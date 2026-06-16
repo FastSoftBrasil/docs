@@ -1,55 +1,32 @@
-# Mintlify Starter Kit
+# FastPay — Documentação (Mintlify)
 
-Use the starter kit to get your docs deployed and ready to customize.
+Doc oficial da API FastPay. API Reference auto-gerada de `api-reference/openapi.yaml`; guias em `guias/`.
 
-Click the green **Use this template** button at the top of this repo to copy the Mintlify starter kit. The starter kit contains examples with
-
-- Guide pages
-- Navigation
-- Customizations
-- API reference pages
-- Use of popular components
-
-**[Follow the full quickstart guide](https://starter.mintlify.com/quickstart)**
-
-## AI-assisted writing
-
-Set up your AI coding tool to work with Mintlify:
+## Desenvolvimento
 
 ```bash
-npx skills add https://mintlify.com/docs
-```
-
-This command installs Mintlify's documentation skill for your configured AI tools like Claude Code, Cursor, Windsurf, and others. The skill includes component reference, writing standards, and workflow guidance.
-
-See the [AI tools guides](/ai-tools) for tool-specific setup.
-
-## Development
-
-Install the [Mintlify CLI](https://www.npmjs.com/package/mint) to preview your documentation changes locally. To install, use the following command:
-
-```
 npm i -g mint
+mint dev            # http://localhost:3000
+mint broken-links   # checagem de links
+mint openapi-check api-reference/openapi.yaml
 ```
 
-Run the following command at the root of your documentation, where your `docs.json` is located:
+## Deploy (Mintlify hosted)
 
-```
-mint dev
-```
+1. Push deste repo pro GitHub.
+2. Conectar o repo no dashboard do Mintlify (GitHub app) → build automático no push.
+3. Custom domain `developers.fastpaybrasil.com` via CNAME (Settings → Domain).
 
-View your local preview at `http://localhost:3000`.
+`/llms.txt` e `/llms-full.txt` são gerados automaticamente pelo Mintlify hospedado.
 
-## Publishing changes
+## Branding
 
-Install our GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app) to propagate changes from your repo to your deployment. Changes are deployed to production automatically after pushing to the default branch.
+- `logo/dark.svg` — logo oficial da FastPay (wordmark claro), usado em fundo escuro.
+- `logo/light.svg` — variante para fundo branco: ícone azul oficial + wordmark recolorido para `#1A2433` (derivado, pois só recebemos a arte de fundo escuro). Se houver export oficial do logo para fundo claro, basta substituir este arquivo.
+- `favicon.svg` — ícone da marca (`#017AFF`).
+- `colors.primary` = `#017AFF` (azul da marca, extraído do ícone).
 
-## Need help?
+## Pendências
 
-### Troubleshooting
-
-- If your dev environment isn't running: Run `mint update` to ensure you have the most recent version of the CLI.
-- If a page loads as a 404: Make sure you are running in a folder with a valid `docs.json`.
-
-### Resources
-- [Mintlify documentation](https://mintlify.com/docs)
+- [ ] (Opcional) Trocar `logo/light.svg` pelo export oficial do logo para fundo claro, se existir.
+- [ ] Conectar ao Mintlify e configurar o domínio `developers.fastpaybrasil.com`.

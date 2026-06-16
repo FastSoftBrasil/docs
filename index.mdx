@@ -1,20 +1,125 @@
 ---
-title: "Introduction"
-description: "Welcome to your project"
+title: "Início Rápido"
+description: "Primeiros passos para integrar a solução de pagamentos da FastPay."
 ---
 
-Write a short description of your product here. What it does, who it's for, and what they can accomplish with it.
+Bem-vindo à documentação oficial da FastPay API! Este guia irá ajudá-lo a dar os primeiros passos para integrar nossa solução de pagamentos em sua aplicação.
 
-<Tip>
-  Ready to make this your own? Start by editing this page. Update your `docs.json` file to customize your site. Then fill out the [Quickstart](/quickstart) page.
-</Tip>
+## Visão Geral
 
-<Card title="Quickstart" icon="rocket" href="/quickstart">
-  This card links to the quickstart page in your project.
-</Card>
-<Card title="Components" icon="puzzle-piece" href="https://mintlify.com/docs/components">
-  Add cards, callouts, steps, tabs, and more to design and structure your pages.
-</Card>
-<Card title="Settings" icon="gear" href="https://mintlify.com/docs/organize/settings">
-  Set your site name, branding, and navigation in the `docs.json` file.
-</Card>
+Nossa API oferece uma solução completa para:
+
+- **Processamento de Pagamentos**: Métodos de pagamento locais em múltiplos países
+- **Assinaturas Recorrentes**: Cobrança automática para planos de assinatura
+- **Gestão de Transações**: Controle completo sobre suas transações
+- **Sistema de Webhooks**: Notificações em tempo real sobre mudanças de status
+- **Gestão de Carteiras**: Consulta de saldos e movimentações
+- **Cobertura Global**: Métodos de pagamento específicos por região
+- **Segurança 3D Secure**: Autenticação avançada para transações com cartão de crédito
+
+## Pré-requisitos
+
+Antes de começar, certifique-se de ter:
+
+1. **Credenciais de API**
+   - API Key de autenticação
+   - URL base da API
+2. **Ambiente de Desenvolvimento**
+   - Cliente HTTP (Postman, Insomnia, ou biblioteca de sua linguagem)
+   - Ambiente para receber webhooks (opcional para testes iniciais)
+
+## Primeiros Passos
+
+### 1. Autenticação
+
+Todas as requisições à API devem incluir o header de autenticação. A API key deve estar no formato `SUA_API_KEY:` convertido para base64:
+
+```
+Authorization: Basic <token_base64>
+```
+
+**Formato do Token:**
+
+- Combine `SUA_API_KEY:` (sua chave secreta seguida de dois pontos)
+- Converta para base64
+- Use o resultado no header Authorization
+
+**Exemplo:**
+
+```bash
+# Se sua API key for: abc123
+# O formato sera: abc123:
+# Convertido para base64: YWJjMTIzOg==
+# Header final: Authorization: Basic YWJjMTIzOg==
+```
+
+### 2. Teste de Conexão
+
+Faça uma requisição simples para verificar se suas credenciais estão funcionando:
+
+```bash
+curl -X GET "https://api-global.fastpaybrasil.com/v1/payment-methods" \
+  -H "Authorization: Basic <seu_token_base64_aqui>"
+```
+
+### 3. Sua Primeira Transação {#sua-primeira-transacao}
+
+Exemplo de criação de uma cobrança com método de pagamento local:
+
+```bash
+curl -X POST "https://api-global.fastpaybrasil.com/v1/charges" \
+  -H "Authorization: Basic <seu_token_base64_aqui>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "amount": 100,
+    "currency": "BRL",
+    "customer": {
+      "name": "Joao Silva",
+      "email": "joao@email.com",
+      "document": {
+        "type": "cpf",
+        "id": "12345678900"
+      },
+      "phone": "11987654321",
+      "address": {
+        "country": "BRA"
+      }
+    },
+    "paymentMethod": {
+      "type": "pix",
+      "expirationInDays": 1
+    },
+    "items": [
+      {
+        "title": "Produto XYZ",
+        "type": "digital",
+        "description": "Descrição do produto",
+        "unit_price": 100,
+        "quantity": 1
+      }
+    ],
+    "postbackUrl": "https://meusite.com/webhook/pagamentos"
+  }'
+```
+
+<Note>Este exemplo mostra um pagamento PIX (Brasil). A API suporta múltiplos métodos de pagamento locais incluindo Rapipago (Argentina), Khipu (Chile), QRCode e cartões de crédito. Use o endpoint `/v1/payment-methods` para consultar os métodos disponíveis por país.</Note>
+
+## Ambientes
+
+| Ambiente     | URL Base                             | Descrição                                 |
+| ------------ | ------------------------------------ | ----------------------------------------- |
+| **Produção** | https://api-global.fastpaybrasil.com | Ambiente de produção com transações reais |
+
+## Próximos Passos
+
+Agora que você está familiarizado com os conceitos básicos, explore:
+
+- [**Autenticação**](/guias/autenticacao) - Detalhes completos sobre autenticação
+- [**Assinaturas Recorrentes**](/guias/assinaturas) - Cobrança automática para planos de assinatura
+- [**3D Secure SDK**](/guias/three-ds-sdk) - Implementação de autenticação 3DS para cartões
+- [**Webhooks**](/guias/webhooks) - Sistema de notificações em tempo real
+- [**Referência da API**](/api-reference/charges/create-a-new-charge) - Documentação completa de todos os endpoints
+
+## Suporte
+
+Precisa de ajuda? Entre em contato através do nosso [site oficial](https://www.fastpaybrasil.com/).

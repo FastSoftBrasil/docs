@@ -1,0 +1,228 @@
+---
+title: "Fast Connect"
+description: "Onboarding e gestão de submerchants via Fast Connect."
+---
+
+O FastConnect é um módulo da FastPay que possibilita a criação de marketplaces.
+Ele permite que determinados usuários (MerchantMaster), liberados pelo
+administrador FastPay, possam criar e gerenciar SubMerchants (subcontas
+vinculadas) com controle de taxas, permissões, acessos e rastreabilidade nas
+transações.
+
+## Onboarding
+
+Entre em contato com nossa equipe para obter a liberação e a instalação do módulo em sua plataforma.
+
+### Criação dos SubMerchants
+
+Com o módulo ativo, utilize o endpoint `/v1/submerchants` para criar suas subcontas vinculadas.
+Informe o campo *postbackUrl* no momento do cadastro, para ser notificado assim que uma subconta
+tiver o status alterado no processo de credenciamento.
+
+Exemplo de notificação:
+
+```json
+{
+  "merchantId": "2vorkDcXyvzifL63YX09S9VqcnI",
+  "status": "active",
+  // Os possíveis status são: `pre_approved`, `active`, `blocked` ou `rejected`.
+  "date": "2026-01-13T12:39:48Z"
+}
+```
+
+### Credenciamento
+
+Após criação do SubMerchant, é necessário passar pelo processo de KYC. Para isso,
+utilize o endpoint `/v1/submerchants/{id}/documents` para fazer o upload dos documentos necessários para aprovação.
+
+Todo submerchant herda **taxas, permissões e configurações** do MerchantMaster no momento da criação.
+
+Uma vez aprovado, o SubMerchant está apto a realizar transações.
+
+## Split de Pagamentos
+
+### Configuração e Participantes
+
+Com a estrutura de MerchantMaster e SubMerchants pronta, será possível utilizar o Split de Pagamentos.
+A configuração dos participantes pode ser feita de duas formas, e deve seguir as regras informadas.
+
+  - A soma dos percentuais não deve exceder 100%.
+  - Caso o split tenha menos de 100%, o valor restante permanecerá com o originador da transação.
+  - Todas as contas participantes devem pertencer ao mesmo Connect.
+
+#### Cenários de relacionamentos permitidos
+
+| Originador     | Recebedor                             |
+|----------------|---------------------------------------|
+| MerchantMaster | SubMerchant                           |
+| SubMerchant    | MerchantMaster                        |
+| SubMerchant    | SubMerchant (dentro do mesmo Connect) |
+
+Para vincular transações aos respectivos originadores, a autenticação deve ser feita utilizando as credenciais do **SubMerchant** originador.
+Utilize o endpoint `v1/submerchants/{id}/api-keys` para obter as chaves de API.
+
+
+### 1. Via Painel
+
+No [painel da FastPay](https://www.fastpaybrasil.com/), navegue até:
+**FastConnect** > **Gestão de Subcontas** > **Configurar Split**
+
+Informe os participantes e o percentual de split destinado para cada um em cada transação gerada pela conta.
+Os valores configurados serão definidos como **padrão** do merchant, e todas as transações originadas por ele no futuro seguirão a regra de split definida.
+
+É possível configurar participantes e porcentagens de split personalizadas por meio de pagamento.
+
+### 2. Via API
+
+Alternativamente, você pode configurar o split diretamente no momento da criação de uma cobrança.
+Basta informar no endpoint `/v1/charges` o campo `split` seguindo a estrutura do exemplo abaixo:
+
+```json
+{
+  "amount": 100,
+  "currency": "BRL",
+  "customer": {
+    // ... dados do cliente
+  },
+  // ... demais informações da cobrança
+  "split": [
+    {
+      "merchantId": "2vorkDcXyvzifL63YX09S9VqcnI",
+      "percentage": 10
+    }
+  ]
+}
+```
+
+<Note>A configuração informada via API é exclusiva daquela transação gerada, e prevalecerá sobre a configuração padrão feita via Painel.</Note>
+
+## Liquidação e Repasse
+
+O repasse dos valores de split configurados para cada participante ficam reservados
+e serão feitos no momento da liquidação no saldo do originador da transação.
+
+## Saques para Submerchants
+
+O Fast Connect permite que submerchants solicitem saques de seus saldos disponíveis. O processo funciona em etapas, desde a criação da solicitação até a aprovação ou rejeição pelo gateway.
+
+### Pré-requisitos
+
+Antes de solicitar um saque, certifique-se de que:
+
+- Fast Connect está habilitado no merchant master (`enable_fast_connect = 'true'`)
+- Submerchant está ativo (`status = 'active'`)
+- CNPJ está configurado no submerchant (`company_tax_id`)
+- Taxa de saque está configurada (`fee_definitions` com `fee_type = 'payout'`)
+
+### Fluxo de Saque
+
+#### 1. Criação da Solicitação
+
+O submerchant cria uma solicitação de saque através do endpoint:
+
+```
+POST /v1/submerchants/:merchantId/payout-requests
+```
+
+**Exemplo de requisição:**
+
+```json
+{
+  "amount": 10000
+}
+```
+
+O sistema irá:
+- Validar se o submerchant está ativo e possui CNPJ
+- Calcular as taxas de saque (fixa + percentual)
+- Criar o registro com status `pending`
+- Retornar o ID da solicitação criada
+
+**Exemplo de resposta:**
+
+```json
+{
+  "id": "2vorkDcXyvzifL63YX09S9VqcnI"
+}
+```
+
+Após a criação, a solicitação fica com status `pending` e aguarda processamento pelo gateway.
+
+### Cálculo de Taxas
+
+As taxas de saque são calculadas automaticamente na criação da solicitação:
+
+- **Taxa Fixa**: Valor fixo configurado em `fee_definitions`
+- **Taxa Percentual**: Percentual sobre o valor do saque
+- **Cálculo**: `totalFee = fixedFee + (amount * variableFee / 100)`
+- **Valor Líquido**: `netAmount = amount - totalFee`
+
+### Consulta de Solicitações
+
+Você pode consultar as solicitações de saque de diferentes formas:
+
+**Listar todas as solicitações:**
+```
+GET /v1/payout-requests
+```
+
+**Obter uma solicitação específica:**
+```
+GET /v1/payout-requests/:payoutRequestId
+```
+
+**Filtros disponíveis:**
+- `merchantId`: Filtrar por submerchant
+- `status`: Filtrar por status (`pending`, `approved`, `rejected`)
+- `currency`: Filtrar por moeda
+- `createdAt`: Filtrar por data de criação
+- `processedAt`: Filtrar por data de processamento
+
+### Notificações via Webhook
+
+Quando uma solicitação é aprovada ou rejeitada, o sistema envia automaticamente um webhook para o submerchant:
+
+**Eventos disponíveis:**
+- `payout.approved`: Enviado quando o saque é aprovado
+- `payout.rejected`: Enviado quando o saque é rejeitado
+
+**Exemplo de webhook de aprovação:**
+
+```json
+{
+  "id": "evt_2RhQg9M7ZCg3X3nMb9W1kX8Q",
+  "event": "payout.approved",
+  "data": {
+    "id": "2vorkDcXyvzifL63YX09S9VqcnI",
+    "merchantId": "36OO3bcGjhPjjF3tzrqOGcmQuKo",
+    "amount": 10000,
+    "currency": "BRL",
+    "status": "approved",
+    "payoutFee": 100,
+    "netAmount": 9900,
+    "processedAt": "2025-12-04T18:45:52.988Z"
+  }
+}
+```
+
+Para mais detalhes sobre webhooks de saque, consulte a [documentação completa de webhooks de saque](/guias/webhooks/payout).
+
+
+### Valores e Moedas
+
+- Todos os valores são informados em **centavos** (ex: R$ 100,00 = 10000)
+- A moeda é sempre **BRL** para submerchants
+- O saque é realizado via **PIX** usando o CNPJ do submerchant como chave PIX
+
+### Segurança
+
+- Apenas submerchants vinculados ao merchant master podem criar solicitações
+- Todas as operações são transacionais e auditáveis
+
+### Documentação de Referência
+
+Para mais detalhes sobre os endpoints de saque, consulte:
+
+- [Criar solicitação de saque](/api-reference/fastconnect/create-payout-request)
+- [Obter solicitação de saque por ID](/api-reference/fastconnect/get-payout-request-by-id)
+- [Listar solicitações de saque](/api-reference/fastconnect/list-payout-requests)

@@ -1,72 +1,61 @@
 {
   "$schema": "https://mintlify.com/docs.json",
   "theme": "mint",
-  "name": "Mintlify Starter Kit",
+  "name": "FastPay",
   "colors": {
-    "primary": "#16A34A",
-    "light": "#07C983",
-    "dark": "#15803D"
+    "primary": "#017AFF",
+    "light": "#4D9FFF",
+    "dark": "#0061CC"
   },
   "favicon": "/favicon.svg",
-  "navigation": {
-    "pages": [
-      {
-        "group": "Getting Started",
-        "pages": [
-          "index",
-          "quickstart"
-        ]
-      }
-    ],
-    "global": {
-      "anchors": [
-        {
-          "anchor": "Documentation",
-          "href": "https://mintlify.com/docs",
-          "icon": "book-open-cover"
-        },
-        {
-          "anchor": "Blog",
-          "href": "https://mintlify.com/blog",
-          "icon": "newspaper"
-        }
-      ]
-    }
-  },
   "logo": {
     "light": "/logo/light.svg",
     "dark": "/logo/dark.svg"
   },
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Guias",
+        "groups": [
+          { "group": "Introdução", "pages": ["index"] },
+          { "group": "Autenticação", "pages": ["guias/autenticacao"] },
+          {
+            "group": "Recursos",
+            "pages": [
+              "guias/assinaturas",
+              "guias/fast-connect",
+              "guias/apple-pay",
+              "guias/three-ds-sdk",
+              "guias/estorno",
+              "guias/bloqueio-de-transacao"
+            ]
+          },
+          {
+            "group": "Webhooks",
+            "pages": [
+              "guias/webhooks/index",
+              "guias/webhooks/charge",
+              "guias/webhooks/payout",
+              "guias/webhooks/subscription",
+              "guias/webhooks/conta"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "openapi": "api-reference/openapi.yaml"
+      }
+    ]
+  },
   "navbar": {
     "links": [
-      {
-        "label": "Support",
-        "href": "mailto:hi@mintlify.com"
-      }
-    ],
-    "primary": {
-      "type": "button",
-      "label": "Dashboard",
-      "href": "https://app.mintlify.com"
-    }
-  },
-  "contextual": {
-    "options": [
-      "copy",
-      "view",
-      "chatgpt",
-      "claude",
-      "perplexity",
-      "mcp",
-      "cursor",
-      "vscode"
+      { "label": "Painel FastPay", "href": "https://www.fastpaybrasil.com/" }
     ]
   },
   "footer": {
     "socials": {
-      "x": "https://x.com/mintlify",
-      "github": "https://github.com/mintlify",
-      "linkedin": "https://linkedin.com/company/mintlify"
+      "website": "https://www.fastpaybrasil.com/"
     }
   }
 }

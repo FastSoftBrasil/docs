@@ -1,0 +1,213 @@
+---
+title: "Webhooks"
+description: "Receba notificações em tempo real sobre mudanças de status das transações."
+---
+
+Os webhooks da FastPay permitem que sua aplicação receba notificações em tempo real sobre mudanças no status das transações, eliminando a necessidade de polling constante da API.
+
+## Como funcionam
+
+Quando um evento importante acontece (como uma cobrança sendo paga ou uma assinatura renovada), a FastPay envia automaticamente uma requisição HTTP POST para a URL que você configurou, contendo todos os detalhes do evento.
+
+## Configuração
+
+Os webhooks podem ser configurados de duas formas:
+
+### 1. Via Painel da FastPay
+
+No [painel da FastPay](https://www.fastpaybrasil.com/), navegue até:
+**Configurações** > **Webhooks** > **Criar Webhook**
+
+Informe a URL onde deseja receber as notificações e selecione os eventos desejados.
+
+### 2. Via API (campo postbackUrl)
+
+No momento da criação da cobrança, você pode informar o campo `postbackUrl`:
+
+```json
+{
+  "amount": 100,
+  "currency": "BRL",
+  "postbackUrl": "https://meusite.com/webhooks/fastpay",
+  "customer": {
+    // ... dados do cliente
+  }
+}
+```
+
+<Note>
+**`postbackUrl` é um canal assíncrono**, não a resposta síncrona da criação. A URL configurada recebe notificações do ciclo de vida da cobrança **após** ela ter sido criada:
+- PIX: `charge.pending` (quando o QR Code é gerado) e depois `charge.paid`
+- Cartão: `charge.paid`, `charge.refunded` e o postback legado `charge.updated` (em caso de bloqueio, falha 3DS ou atualização de PSP)
+
+O `postbackUrl` recebe os mesmos eventos que os webhook endpoints configurados no painel para cobranças, mais o evento legado `charge.updated` exclusivo do postback. Os dados do QR Code e expiração do PIX estão disponíveis na **resposta síncrona** da API de criação, não no webhook.
+</Note>
+
+## Estrutura do Payload
+
+### Envelope padrão (Cobranças e Assinaturas)
+
+A maioria dos webhooks usa o envelope completo com `id`, `event`, `livemode` e `data`:
+
+```json
+{
+  "id": "webhook_event_id",
+  "event": "charge.paid",
+  "livemode": true,
+  "data": {
+    // Objeto completo do recurso
+  }
+}
+```
+
+O campo `livemode` é `false` para cobranças de teste (`is_test: true`).
+
+### Envelope de Payout (mais simples)
+
+Os webhooks de payout e outros eventos de merchant usam um envelope sem `livemode`, onde o `id` de topo corresponde ao ID do recurso (não a um ID de evento global):
+
+```json
+{
+  "id": "<payoutRequestId>",
+  "event": "payout.approved",
+  "data": {
+    // Objeto do recurso
+  }
+}
+```
+
+## Famílias de Eventos
+
+A FastPay dispara webhooks para quatro famílias de recursos:
+
+- [**Cobranças (Charges)**](/guias/webhooks/charge) — Eventos do ciclo de vida de cobranças: `charge.created`, `charge.pending`, `charge.paid`, `charge.refunded` e o postback legado `charge.updated`
+- [**Assinaturas (Subscriptions)**](/guias/webhooks/subscription) — Eventos de assinaturas recorrentes: `subscription.created`, `subscription.activated`, `subscription.renewed`, `subscription.payment_failed`, `subscription.cancelled`, `subscription.paused`, `subscription.expired`
+- [**Saques (Payouts)**](/guias/webhooks/payout) — Eventos de saque para submerchants do Fast Connect: `payout.approved`, `payout.rejected`
+- [**Conta/Merchant**](/guias/webhooks/conta) — Eventos de aprovação e atualização de conta de merchant
+
+## Implementação
+
+### Endpoint básico
+
+Seu endpoint deve:
+1. **Aceitar POST requests** na URL configurada
+2. **Responder com status 200** para confirmar o recebimento
+3. **Processar rapidamente** — devolva 200 antes de executar lógica de negócio pesada
+4. **Tratar dados JSON** enviados no body da requisição
+
+```javascript
+const processedEvents = new Set();
+
+app.post('/webhooks/fastpay', (req, res) => {
+  const { id, event, data } = req.body;
+
+  // Verificar se já processamos este evento (idempotência)
+  if (id && processedEvents.has(id)) {
+    return res.status(200).send('Already processed');
+  }
+
+  // Responder imediatamente e processar de forma assíncrona
+  res.status(200).send('OK');
+
+  // Processar evento...
+  handleWebhookEvent(event, data).catch(console.error);
+
+  if (id) {
+    processedEvents.add(id);
+  }
+});
+```
+
+## Segurança e Boas Práticas
+
+### Ausência de assinatura HMAC
+
+<Warning>
+Os webhooks da FastPay **não incluem atualmente um header de assinatura HMAC**. Para validar a autenticidade de um evento recebido, recomendamos confirmar os dados diretamente na API (ex: `GET /v1/charges/{id}`) antes de executar ações críticas. Use sempre **HTTPS** nos seus endpoints.
+</Warning>
+
+### Boas práticas
+
+1. **Use HTTPS** — endpoints HTTP podem expor dados sensíveis
+2. **Valide via API** — confirme o estado real do recurso antes de liberar acesso ou processar pagamentos
+3. **Implemente idempotência** — use o campo `id` do envelope para evitar processamento duplicado
+4. **Implemente rate limiting** no seu endpoint para proteção contra abuso
+
+### Idempotência
+
+Webhooks podem ser entregues mais de uma vez. Use o campo `id` para evitar processamento duplicado:
+
+```javascript
+// Em produção, use um armazenamento persistente (Redis, banco de dados, etc.)
+const processedEvents = new Set();
+
+app.post('/webhooks/fastpay', (req, res) => {
+  const { id, event, data } = req.body;
+
+  if (id && processedEvents.has(id)) {
+    return res.status(200).send('Already processed');
+  }
+
+  // Processar evento...
+
+  if (id) {
+    processedEvents.add(id);
+  }
+
+  res.status(200).send('OK');
+});
+```
+
+## Retentativas
+
+O comportamento de retentativa varia por tipo de canal:
+
+**Webhook endpoints (fila BullMQ)** — eventos das famílias charge, subscription e account são enfileirados. Em caso de falha (resposta HTTP >= 400 ou timeout), a fila gerencia as retentativas automaticamente.
+
+**Postback legado (`charge.updated`)** — o canal de postback direto tenta o envio até **3 vezes** em caso de falha, com backoff exponencial: ≈1 s, ≈2 s, ≈4 s entre as tentativas.
+
+**Payout webhooks** — enviados diretamente sem retentativas automáticas. Falhas são registradas em log; use o painel para reenvio manual.
+
+## Testando Webhooks
+
+### Ferramentas úteis
+
+1. **ngrok** — Para expor localhost na internet durante desenvolvimento
+2. **webhook.site** — Para inspecionar payloads durante testes
+3. **Postman** — Para simular webhooks manualmente
+
+### Exemplo com ngrok
+
+```bash
+# Instalar ngrok
+npm install -g ngrok
+
+# Expor porta local
+ngrok http 3000
+
+# Usar a URL gerada (ex: https://abc123.ngrok.io/webhooks/fastpay)
+```
+
+## Monitoramento
+
+No painel da FastPay, você pode:
+
+- **Ver histórico** de webhooks enviados
+- **Reenviar webhooks** falhados manualmente
+- **Verificar logs** de entrega
+- **Testar endpoints** com payloads de exemplo
+
+## Troubleshooting
+
+### Webhook não está sendo recebido
+
+1. Verifique se a URL está correta e acessível pela internet
+2. Confirme que seu servidor responde com status 200
+3. Verifique logs no painel da FastPay
+4. Teste a URL manualmente com cURL
+
+### Múltiplos webhooks para o mesmo evento
+
+Isso pode acontecer em caso de timeout no seu endpoint, resposta com status diferente de 2xx ou problemas temporários de rede.
+
+**Solução**: Implemente idempotência usando o campo `id` do envelope.

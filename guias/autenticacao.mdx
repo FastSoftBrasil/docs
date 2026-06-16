@@ -1,0 +1,267 @@
+---
+title: "Autenticação"
+description: "Como obter e usar suas credenciais (Basic Auth) na FastPay API."
+---
+
+A autenticação é o primeiro passo para integrar com a FastPay API. Este guia irá mostrar como obter e usar suas credenciais de forma segura.
+
+## Visão Geral
+
+Nossa API utiliza **autenticação Basic Auth** com API keys seguras. Todas as requisições devem incluir o header de autorização para serem processadas.
+
+### Características de Segurança
+
+- API keys únicas por merchant
+- HTTPS obrigatório em todas as requisições
+- Autenticação baseada em padrões da indústria
+
+## Obtendo suas Credenciais
+
+### Passo 1: Acesse o Painel
+
+1. Navegue até o [painel da FastPay](https://www.fastpaybrasil.com/)
+2. Faça login em sua conta
+3. Acesse **Configurações**
+4. Selecione **Chave de API**
+
+### Passo 2: Gere sua API Key
+
+<Warning>Guarde sua API key em um local seguro! Por motivos de segurança, ela será exibida apenas uma vez.</Warning>
+
+```bash
+# Exemplo de API key
+sk_9a8s7d6f5g4h3j2k1l0z9x8c7v6b5n4m3
+```
+
+## Como Usar
+
+### Header de Autenticação
+
+```bash
+# Formato: SUA_API_KEY: convertido para Base64
+Authorization: Basic <token_base64>
+```
+
+**Exemplo prático:**
+```bash
+# Se sua API key for: sk_abc123
+# Combine: sk_abc123:
+# Resultado em Base64: c2tfYWJjMTIzOg==
+# Header: Authorization: Basic c2tfYWJjMTIzOg==
+```
+
+## Exemplos de Implementação
+
+### JavaScript (Node.js)
+
+```javascript
+const axios = require('axios');
+
+const apiKey = 'sk_9a8s7d6f5g4h3j2k1l0z9x8c7v6b5n4m3';
+const credentials = Buffer.from(`${apiKey}:`).toString('base64');
+
+axios.get('https://api-global.fastpaybrasil.com/v1/payment-methods', {
+  headers: {
+    Authorization: `Basic ${credentials}`,
+  }
+});
+```
+
+### cURL
+
+```bash
+curl -X GET "https://api-global.fastpaybrasil.com/v1/payment-methods" \
+  -H "Authorization: Basic $(echo -n 'sua_api_key:' | base64)"
+```
+
+### PHP
+
+```php
+<?php
+$apiKey = 'sk_9a8s7d6f5g4h3j2k1l0z9x8c7v6b5n4m3';
+$credentials = base64_encode("$apiKey:");
+
+$curl = curl_init();
+curl_setopt_array($curl, [
+    CURLOPT_URL => 'https://api-global.fastpaybrasil.com/v1/payment-methods',
+    CURLOPT_RETURNTRANSFER => true,
+    CURLOPT_HTTPHEADER => [
+        'Authorization: Basic ' . $credentials,
+        'Content-Type: application/json'
+    ]
+]);
+
+$response = curl_exec($curl);
+curl_close($curl);
+?>
+```
+
+### Python
+
+```python
+import requests
+import base64
+
+api_key = 'sk_9a8s7d6f5g4h3j2k1l0z9x8c7v6b5n4m3'
+credentials = base64.b64encode(f'{api_key}:'.encode()).decode()
+
+headers = {
+    'Authorization': f'Basic {credentials}',
+    'Content-Type': 'application/json'
+}
+
+response = requests.get(
+    'https://api-global.fastpaybrasil.com/v1/payment-methods',
+    headers=headers
+)
+```
+
+## Boas Práticas de Segurança
+
+### 1. Armazenamento Seguro
+
+**Nunca faça isso:**
+```javascript
+// INSEGURO - API key exposta no código
+const apiKey = 'sk_9a8s7d6f5g4h3j2k1l0z9x8c7v6b5n4m3';
+```
+
+**Faça isso:**
+```javascript
+// SEGURO - API key em variável de ambiente
+const apiKey = process.env.FASTPAY_API_KEY;
+```
+
+### 2. Variáveis de Ambiente
+
+Configure suas variáveis de ambiente:
+
+```bash
+# Configure sua variável de ambiente
+export FASTPAY_API_URL="https://api-global.fastpaybrasil.com"
+export FASTPAY_API_KEY="sua_api_key_aqui"
+```
+
+### 3. Diretrizes Gerais
+
+- **Nunca exponha** sua API key em código client-side
+- **Use variáveis de ambiente** para armazenar chaves
+- **Rotacione chaves** periodicamente
+- **Use HTTPS** sempre para comunicação
+- **Monitore logs** de acesso para atividades suspeitas
+
+## Tratamento de Erros
+
+### Erro 401 - Não Autorizado
+
+```json
+{
+  "message": "Unauthorized",
+  "statusCode": 401
+}
+```
+
+**Possíveis causas:**
+- API key inválida ou expirada
+- Header de autorização ausente
+- Formato incorreto do header
+
+### Erro 403 - Proibido
+
+```json
+{
+  "message": "Forbidden",
+  "statusCode": 403
+}
+```
+
+**Possíveis causas:**
+- API key sem permissões para o recurso
+- Acesso negado para a operação solicitada
+
+## Próximos Passos
+
+Agora que você está autenticado, explore:
+
+- [Criar sua primeira transação](/#sua-primeira-transacao)
+- [Sistema de Webhooks](/guias/webhooks)
+- [Referência completa da API](/api-reference/charges/create-a-new-charge)
+
+---
+
+Para dúvidas sobre autenticação, consulte nosso [site oficial](https://www.fastpaybrasil.com/).
+
+---
+
+## Ambientes: Sandbox e Produção
+
+A FastPay usa a **mesma URL base** para sandbox e produção:
+
+```
+https://api-global.fastpaybrasil.com
+```
+
+O ambiente é determinado pela **chave de API** utilizada, não pela URL. Cada chave carrega internamente um flag de teste (`isTest`):
+
+| Tipo de chave | Ambiente | Transações reais? |
+| ------------- | --------- | ----------------- |
+| Chave de teste | Sandbox | Não — dados simulados |
+| Chave live | Produção | Sim — cobranças reais |
+
+### Criação e rotação de chaves
+
+As chaves de teste e live são geradas e rotacionadas no [painel da FastPay](https://www.fastpaybrasil.com/), em **Configurações → Chave de API**. Por segurança, a rotação pode exigir uma etapa de verificação.
+
+<Warning>
+Nunca compartilhe sua chave live em código client-side, repositórios públicos ou mensagens. Rotacione imediatamente se suspeitar de comprometimento.
+</Warning>
+
+---
+
+## Idempotência
+
+A API FastPay **não** suporta o header `Idempotency-Key`.
+
+Para evitar cobranças duplicadas em caso de timeout ou retry, **consulte o status do charge antes de reenviar** a requisição:
+
+```bash
+curl -X GET "https://api-global.fastpaybrasil.com/v1/charges/<chargeId>" \
+  -H "Authorization: Basic $(echo -n 'sua_api_key:' | base64)"
+```
+
+Se o charge já existir e estiver com o status esperado (`pending`, `paid`, etc.), não crie um novo.
+
+---
+
+## Paginação
+
+Os endpoints de listagem utilizam os parâmetros `page` e `size` (não `limit`):
+
+| Parâmetro | Tipo | Padrão | Descrição |
+| --------- | ---- | ------ | --------- |
+| `page` | integer | `1` | Número da página (base 1) |
+| `size` | integer | varia | Quantidade de itens por página |
+
+**Exemplo:**
+
+```bash
+GET /v1/charges?page=2&size=20
+```
+
+---
+
+## Ordenação
+
+Use o parâmetro `orderBy` para controlar a ordem dos resultados:
+
+| Formato | Direção | Exemplo |
+| ------- | ------- | ------- |
+| `campo` | Ascendente (A→Z / mais antigo→mais novo) | `orderBy=createdAt` |
+| `-campo` | Descendente (Z→A / mais novo→mais antigo) | `orderBy=-createdAt` |
+| Múltiplos campos | Separados por vírgula | `orderBy=-createdAt,amount` |
+
+**Exemplo — cobranças mais recentes primeiro:**
+
+```bash
+GET /v1/charges?page=1&size=20&orderBy=-createdAt
+```

@@ -1,0 +1,139 @@
+---
+title: "Estorno (Refund)"
+description: "Como solicitar o estorno total de uma cobrança via API."
+---
+
+A FastPay permite solicitar o estorno de cobranças pagas via API. O estorno é suportado para cobranças PIX e cartão de crédito.
+
+<Note>
+A API suporta apenas **estorno total**. Estornos parciais (de valor menor que o original) não são suportados.
+</Note>
+
+## Endpoint
+
+```
+POST /v1/refunds
+```
+
+Autenticação via **Basic Auth** com sua API key. Consulte [Autenticação](/guias/autenticacao) se precisar de ajuda com o header.
+
+## Request
+
+### Body (JSON)
+
+| Campo | Tipo | Obrigatório | Descrição |
+| ----- | ---- | ----------- | --------- |
+| `chargeId` | string | Sim | ID da cobrança a ser estornada |
+| `reason` | string | Sim | Motivo do estorno (texto livre; registrado para auditoria) |
+
+```json
+{
+  "chargeId": "2RhQg9M7ZCg3X3nMb9W1kX8Q",
+  "reason": "Solicitação de cancelamento pelo cliente"
+}
+```
+
+## Pré-condições
+
+Para que o estorno seja aceito:
+
+- O charge deve estar com `status: "paid"`.
+- Não pode existir outro estorno `pending` ou `refunded` para o mesmo charge (cada charge comporta apenas um estorno).
+
+Se alguma das condições não for atendida, a API retorna um erro com a descrição do motivo.
+
+## Response
+
+**HTTP 201 Created**
+
+```json
+{
+  "status": "refunded",
+  "reason": null,
+  "pspRefundRefId": "psp_refund_abc123xyz"
+}
+```
+
+### Campos da resposta
+
+| Campo | Tipo | Descrição |
+| ----- | ---- | --------- |
+| `status` | string | Status do estorno: `refunded`, `pending`, `refused` ou `failed` |
+| `reason` | string \| null | Motivo de recusa ou falha, quando aplicável |
+| `pspRefundRefId` | string \| null | ID de referência do estorno no PSP, quando disponível |
+
+### Valores de `status`
+
+| Valor | Significado |
+| ----- | ----------- |
+| `refunded` | Estorno concluído com sucesso |
+| `pending` | Estorno aceito pelo PSP, aguardando processamento final |
+| `refused` | Estorno recusado pelo PSP |
+| `failed` | Falha no processamento |
+
+## Efeito no charge
+
+Quando o estorno é processado com sucesso (`status: "refunded"`):
+
+1. O charge passa a ter `status: "refunded"`.
+2. O webhook **`charge.refunded`** é disparado e entregue a todos os webhook endpoints configurados do merchant, além do `postback_url` da cobrança (se configurado).
+
+Consulte [Webhooks de Cobrança](/guias/webhooks/charge) para detalhes do payload do evento `charge.refunded`.
+
+## Exemplo cURL
+
+```bash
+curl -X POST "https://api-global.fastpaybrasil.com/v1/refunds" \
+  -H "Authorization: Basic $(echo -n 'sua_api_key:' | base64)" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "chargeId": "2RhQg9M7ZCg3X3nMb9W1kX8Q",
+    "reason": "Solicitação de cancelamento pelo cliente"
+  }'
+```
+
+**Resposta esperada:**
+
+```json
+{
+  "status": "refunded",
+  "reason": null,
+  "pspRefundRefId": "psp_refund_abc123xyz"
+}
+```
+
+## Exemplo JavaScript
+
+```javascript
+const apiKey = process.env.FASTPAY_API_KEY;
+const credentials = Buffer.from(`${apiKey}:`).toString('base64');
+
+const response = await fetch('https://api-global.fastpaybrasil.com/v1/refunds', {
+  method: 'POST',
+  headers: {
+    'Authorization': `Basic ${credentials}`,
+    'Content-Type': 'application/json',
+  },
+  body: JSON.stringify({
+    chargeId: '2RhQg9M7ZCg3X3nMb9W1kX8Q',
+    reason: 'Solicitação de cancelamento pelo cliente',
+  }),
+});
+
+const refund = await response.json();
+
+if (refund.status === 'refunded') {
+  console.log('Estorno concluído:', refund.pspRefundRefId);
+} else {
+  console.warn('Estorno não finalizado:', refund.status, refund.reason);
+}
+```
+
+<Warning>
+A API não suporta `Idempotency-Key`. Para evitar estornos duplicados em caso de timeout, consulte o status do charge (`GET /v1/charges/:id`) antes de reenviar a requisição. Se já houver um estorno `pending` ou `refunded`, não envie uma nova solicitação.
+</Warning>
+
+## Referências
+
+- [Referência da API — Refunds](/api-reference)
+- [Webhooks de Cobrança — charge.refunded](/guias/webhooks/charge)
