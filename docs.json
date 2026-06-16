@@ -17,18 +17,8 @@
       {
         "tab": "Guias",
         "groups": [
-          {
-            "group": "Introdução",
-            "pages": [
-              "index"
-            ]
-          },
-          {
-            "group": "Autenticação",
-            "pages": [
-              "guias/autenticacao"
-            ]
-          },
+          { "group": "Introdução", "pages": ["index"] },
+          { "group": "Autenticação", "pages": ["guias/autenticacao"] },
           {
             "group": "Recursos",
             "pages": [
@@ -54,16 +44,13 @@
       },
       {
         "tab": "API Reference",
-        "openapi": "api-reference/openapi.json"
+        "openapi": "api-reference/openapi.yaml"
       }
     ]
   },
   "navbar": {
     "links": [
-      {
-        "label": "Painel FastPay",
-        "href": "https://www.fastpaybrasil.com/"
-      }
+      { "label": "Painel FastPay", "href": "https://www.fastpaybrasil.com/" }
     ]
   },
   "footer": {
