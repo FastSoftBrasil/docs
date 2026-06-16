@@ -51,6 +51,16 @@ stateDiagram-v2
 
 O fluxo comum de aprovação é: **pending → pre_approved → active**. Caso a equipe de compliance solicite ajustes, o status vai para **correcting** e retorna a **pending** quando o merchant reenviar os dados corrigidos. Uma conta pode ser **rejected** em qualquer ponto anterior à ativação. Contas **active** podem ser **blocked** temporariamente e desbloqueadas; ou **inactive** quando encerradas.
 
+## Corrigindo os dados (status `correcting`)
+
+Ao solicitar correções para um submerchant, ele é notificado com o status **`correcting`** (o motivo vem no campo `rejectionReason`). A correção, porém, **não é feita via API** — só é possível corrigir os dados pelo **painel**, em:
+
+<Note>
+**FastConnect → Gestão de subcontas → Correções pendentes → Ações (⋯) → Corrigir Dados**
+</Note>
+
+Após o reenvio dos dados pelo painel, a conta retorna ao fluxo de análise (`pending`).
+
 ## Payload
 
 O payload é enviado via `POST` para a `merchant_status_postback_url` configurada. Não há envelope externo — o body é diretamente o objeto de notificação.
