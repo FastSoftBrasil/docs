@@ -193,24 +193,24 @@ Para dúvidas sobre autenticação, consulte nosso [site oficial](https://www.fa
 
 ---
 
-## Ambientes: Sandbox e Produção
+## Ambientes
 
-A FastPay usa a **mesma URL base** para sandbox e produção:
+A FastPay usa a **mesma URL base** para sandbox e produção. O ambiente é determinado **apenas pela chave de API** utilizada — não pela URL. Use a chave de teste para o sandbox e a chave live para produção; o endpoint é exatamente o mesmo.
 
-```
-https://api-global.fastpaybrasil.com
-```
+| Ambiente | URL Base | Descrição |
+| -------- | -------- | --------- |
+| Produção | `https://api-global.fastpaybrasil.com` | Ambiente de produção com transações reais |
+| Sandbox | `https://api-global.fastpaybrasil.com` | Ambiente de testes — mesma URL, alterando apenas a chave de API |
 
-O ambiente é determinado pela **chave de API** utilizada, não pela URL. Cada chave carrega internamente um flag de teste (`isTest`):
+### Gerando a chave de teste
 
-| Tipo de chave | Ambiente | Transações reais? |
-| ------------- | --------- | ----------------- |
-| Chave de teste | Sandbox | Não — dados simulados |
-| Chave live | Produção | Sim — cobranças reais |
+Para gerar a chave de API de teste e operar no sandbox:
 
-### Criação e rotação de chaves
+1. Acesse o [painel da FastPay](https://www.fastpaybrasil.com/) e faça login.
+2. No **canto superior direito** (onde aparecem seu nome e e-mail), abra o menu e ative o **Modo Teste**.
+3. Com o Modo Teste ativo, você verá todas as **movimentações de teste** e poderá **gerar a chave de API de teste**.
 
-As chaves de teste e live são geradas e rotacionadas no [painel da FastPay](https://www.fastpaybrasil.com/), em **Configurações → Chave de API**. Por segurança, a rotação pode exigir uma etapa de verificação.
+Use essa chave de teste nas requisições para operar no sandbox, sem transações reais. Para produção, utilize a chave live (com o Modo Teste desativado).
 
 <Warning>
 Nunca compartilhe sua chave live em código client-side, repositórios públicos ou mensagens. Rotacione imediatamente se suspeitar de comprometimento.
