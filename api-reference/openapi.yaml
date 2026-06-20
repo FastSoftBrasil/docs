@@ -782,6 +782,86 @@ paths:
                     type: string
                     example: Forbidden
 
+  /v1/fast-connect/sub-accounts/{id}/fees-info:
+    get:
+      summary: Get sub-account fees and registration info
+      description: |-
+        Retorna as taxas (transacionais `tx_spread` e de antecipação
+        `anticipation`), a razão social e o CNPJ de uma subconta do Fast Connect.
+
+        O retorno depende de **qual conta** está autenticada — não apenas do `:id`:
+
+        - **Conta master:** usa o `:id` informado e retorna a subconta vinculada
+          (`parent_merchant_id = master`). Id de outra master, inexistente, ou o
+          próprio id do master retorna `404`. Exige `enable_fast_connect`
+          habilitado na master (caso contrário, `403`).
+        - **Subconta:** retorna **sempre os próprios dados**; o `:id` é
+          **ignorado** (não depende de `enable_fast_connect`).
+
+        As taxas vêm como lista plana: a rota **não** mescla overrides de bandeira
+        (`brand: visa/mastercard/elo`) com a taxa padrão (`brand: null`), nem faz
+        fallback para taxas default do gateway — calcular a taxa efetiva por
+        bandeira/parcela é responsabilidade do consumidor.
+      tags:
+        - FastConnect
+      security:
+        - basic: [ ]
+        - bearer: [ ]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Id (KSUID) da subconta. Obrigatório quando autenticado como conta master; ignorado quando autenticado como subconta.
+          schema:
+            type: string
+            example: 2v2TGGb4NHTQWCiMmnelz2WVOZP
+      responses:
+        '200':
+          description: Taxas e dados cadastrais da subconta
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SubAccountFeesInfo'
+        '401':
+          description: Unauthorized - invalid credentials
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  statusCode:
+                    type: integer
+                    example: 401
+                  message:
+                    type: string
+                    example: Não autorizado
+        '403':
+          description: Forbidden - conta não-merchant ou Fast Connect não habilitado na master
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  statusCode:
+                    type: integer
+                    example: 403
+                  message:
+                    type: string
+                    example: Fast Connect não habilitado para esta conta
+        '404':
+          description: Subconta não encontrada (não vinculada, inexistente, ou id do próprio master)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  statusCode:
+                    type: integer
+                    example: 404
+                  message:
+                    type: string
+                    example: Subconta não encontrada
+
   /v1/submerchants/{merchantId}/payout-requests:
     post:
       summary: Create payout request
@@ -5976,3 +6056,67 @@ components:
           nullable: true
           description: 3DS protocol version
           example: "2.2.0"
+
+    SubAccountFeesInfo:
+      type: object
+      properties:
+        merchant:
+          type: object
+          description: Dados cadastrais da subconta
+          properties:
+            id:
+              type: string
+              description: Id (KSUID) da subconta
+              example: 2v2TGGb4NHTQWCiMmnelz2WVOZP
+            legalName:
+              type: string
+              description: Razão social
+              example: ACME PAGAMENTOS DIGITAIS LTDA
+            companyTaxId:
+              type: string
+              description: CNPJ (somente dígitos, 14 caracteres)
+              example: '12345678000190'
+        fees:
+          type: array
+          description: |-
+            Linhas de taxa próprias da subconta (lista plana, ordenada por
+            tipo/método/moeda/bandeira). Array vazio quando a subconta não possui
+            taxas próprias configuradas.
+          items:
+            type: object
+            properties:
+              feeType:
+                type: string
+                enum:
+                  - tx_spread
+                  - anticipation
+                description: 'Tipo da taxa: tx_spread (transacional) ou anticipation (antecipação)'
+                example: tx_spread
+              paymentMethod:
+                type: string
+                nullable: true
+                description: 'Método de pagamento (ex.: credit_card, pix, qrcode). null para taxas sem método associado.'
+                example: credit_card
+              currencyCode:
+                type: string
+                nullable: true
+                description: 'Código da moeda (ISO 4217, ex.: BRL, USD). null quando não se aplica.'
+                example: BRL
+              brand:
+                type: string
+                nullable: true
+                description: 'Bandeira do cartão (visa, mastercard, elo). null representa a taxa padrão (vale para qualquer bandeira sem override).'
+                example: visa
+              definition:
+                type: object
+                properties:
+                  fixed:
+                    type: number
+                    description: Taxa fixa por transação, na moeda do item.
+                    example: 0.5
+                  percentages:
+                    type: array
+                    items:
+                      type: number
+                    description: 'Taxa percentual por parcela: índice 0 = à vista (1x) … índice 11 = 12x. Um único valor para taxas sem parcelamento.'
+                    example: [2.99, 3.49, 3.99, 4.49, 4.99, 5.49, 5.99, 6.49, 6.99, 7.49, 7.99, 8.49]

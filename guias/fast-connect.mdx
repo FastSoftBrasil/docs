@@ -226,3 +226,37 @@ Para mais detalhes sobre os endpoints de saque, consulte:
 - [Criar solicitação de saque](/api-reference/fastconnect/create-payout-request)
 - [Obter solicitação de saque por ID](/api-reference/fastconnect/get-payout-request-by-id)
 - [Listar solicitações de saque](/api-reference/fastconnect/list-payout-requests)
+
+---
+
+## Taxas e dados cadastrais da subconta
+
+Consulte as **taxas** (transacionais e de antecipação) e os **dados cadastrais**
+(razão social e CNPJ) de uma subconta:
+
+```
+GET /v1/fast-connect/sub-accounts/:id/fees-info
+```
+
+Autenticação por **Secret Key** (`sk_`, via Basic) ou **Bearer** (JWT do merchant).
+O comportamento depende de **qual conta** está autenticada:
+
+| Conta autenticada | Comportamento |
+| --- | --- |
+| **Master** | Usa o `:id` e retorna a subconta vinculada. Id não vinculado, inexistente, ou o próprio id do master → `404`. Requer `enable_fast_connect` habilitado (senão `403`). |
+| **Subconta** | Retorna **sempre os próprios dados**; o `:id` é ignorado. |
+
+A resposta traz `merchant` (`id`, `legalName`, `companyTaxId`) e `fees` — uma lista
+**plana** de taxas próprias da subconta (array vazio se não houver taxas próprias).
+Cada item tem `feeType` (`tx_spread` ou `anticipation`), `paymentMethod`,
+`currencyCode`, `brand` e `definition` (`fixed` + `percentages` por parcela:
+índice `0` = à vista … `11` = 12x).
+
+<Note>
+As taxas vêm **como estão**: a rota não mescla overrides de bandeira
+(`brand: "visa"`) com a taxa padrão (`brand: null`), nem faz fallback para taxas
+default. Calcular a taxa efetiva por bandeira/parcela é responsabilidade do
+consumidor.
+</Note>
+
+Detalhe completo (parâmetros, exemplos e respostas) em [Taxas e dados da subconta](/api-reference/fastconnect/get-sub-account-fees-and-registration-info).
