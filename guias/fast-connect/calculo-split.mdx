@@ -1,0 +1,230 @@
+---
+title: "Cálculo de split com taxa do subadquirente"
+description: "Como calcular o percentual de split a informar à Fastpay quando o cliente cobra uma taxa própria sobre o valor bruto da venda."
+---
+
+Quando um cliente integrado ao **FastConnect** (conta master + subcontas) cobra uma taxa própria sobre as vendas das subcontas e a repassa via split para a conta master, surge uma diferença de base de cálculo que precisa ser tratada.
+
+<Info>
+**O ponto central:** a Fastpay aplica o split sobre o valor **líquido** (depois de deduzir todas as taxas dela), mas o cliente normalmente quer cobrar sua taxa sobre o valor **bruto** da venda. Como as bases são diferentes, o percentual de split **não é igual** ao percentual que o cliente cobra — ele precisa ser ajustado.
+</Info>
+
+## O problema
+
+O split na Fastpay é calculado **após** a dedução de todas as taxas da Fastpay sobre a transação:
+
+- Taxas percentuais (ex.: taxa transacional + taxa de antecipação)
+- Taxa fixa por transação (ex.: R\$ 0,40)
+
+O que sobra é o **valor líquido**, e é sobre ele que o percentual de split é aplicado.
+
+Já a plataforma do cliente calcula a taxa dele sobre o **valor bruto** da venda. Repassar o mesmo percentual nos dois lados faria o cliente receber a menos, porque a base do split (líquido) é menor que a base da cobrança (bruto).
+
+## De onde vêm as taxas da Fastpay
+
+As taxas que entram no cálculo (`f` e `c`) não devem ser fixadas no código — elas vêm da própria subconta e podem variar por método, moeda, bandeira e parcela. Consulte-as direto na API:
+
+<Card title="Get sub-account fees and registration info" icon="link" href="/api-reference/fastconnect/get-sub-account-fees-and-registration-info">
+  `GET /v1/fast-connect/sub-accounts/{id}/fees-info` — retorna as taxas transacionais (`tx_spread`) e de antecipação (`anticipation`) da subconta, além de razão social e CNPJ.
+</Card>
+
+A resposta traz `fees` como uma **lista plana**. Cada item relevante para o cálculo tem:
+
+| Campo da API | Uso no cálculo |
+| --- | --- |
+| `feeType: "tx_spread"` | Taxa **transacional** — entra em `f` |
+| `feeType: "anticipation"` | Taxa de **antecipação** — entra em `f` |
+| `definition.percentages[n]` | Percentual por parcela: índice `0` = à vista (1x) … índice `11` = 12x |
+| `definition.fixed` | Taxa **fixa** por transação — entra em `c` |
+| `paymentMethod`, `currencyCode`, `brand` | Filtros para escolher a linha de taxa correta |
+
+<Warning>
+A rota **não** mescla a taxa específica de bandeira (`brand: "visa"`/`"mastercard"`/`"elo"`) com a taxa padrão (`brand: null`), nem faz fallback para taxas default do gateway. Selecionar a linha correta por bandeira/método/moeda e a parcela certa é **responsabilidade de quem consome** — use o override da bandeira quando existir e caia na linha `brand: null` quando não houver.
+</Warning>
+
+Assim, para uma venda em `n` parcelas, o `f` do cálculo é a soma dos `percentages[n-1]` das linhas `tx_spread` e `anticipation` aplicáveis, e o `c` é o `fixed` correspondente.
+
+## A fórmula
+
+Para que o split entregue exatamente o valor que o cliente quer cobrar sobre o bruto:
+
+$$
+L = V \times (1 - f) - c
+$$
+
+$$
+s = \frac{p \times V}{L}
+$$
+
+Onde:
+
+| Variável | Significado |
+| --- | --- |
+| `V` | Valor bruto da venda |
+| `f` | Soma das taxas percentuais da Fastpay (fração — ex.: `0,08` para 8%) |
+| `c` | Taxa fixa da Fastpay por transação (em reais — ex.: `0,40`) |
+| `L` | Valor líquido após as taxas da Fastpay |
+| `p` | Taxa que o cliente quer cobrar sobre o bruto (fração — ex.: `0,02` para 2%) |
+| `s` | Percentual de split a informar à Fastpay (aplicado sobre `L`) |
+
+## Exemplo passo a passo
+
+Venda de **R\$ 100,00** em 2x, com taxa transacional de 5%, antecipação de 3% e taxa fixa de R\$ 0,40. O cliente quer cobrar **2% sobre o bruto**.
+
+<Steps>
+  <Step title="Some as taxas percentuais da Fastpay">
+    5% + 3% = **8%** → `f = 0,08`
+  </Step>
+  <Step title="Calcule o valor líquido">
+    `L = 100 × (1 − 0,08) − 0,40 = 92 − 0,40 = ` **R\$ 91,60**
+  </Step>
+  <Step title="Defina o valor que o cliente quer receber">
+    2% sobre o bruto → `0,02 × 100 = ` **R\$ 2,00**
+  </Step>
+  <Step title="Calcule o percentual de split">
+    `s = 2,00 ÷ 91,60 = ` **2,1834%**
+  </Step>
+  <Step title="Confira">
+    `2,1834% × 91,60 = ` **R\$ 2,00** ✓ — o vendedor (subconta) fica com `91,60 − 2,00 = ` **R\$ 89,60**, que equivale a `100 − 8 − 0,40 − 2`.
+  </Step>
+</Steps>
+
+## Calculadora
+
+Ajuste os valores para ver o percentual de split que deve ser informado à Fastpay.
+
+export const SplitCalculator = () => {
+  const [bruto, setBruto] = useState("100");
+  const [taxaPct, setTaxaPct] = useState("8");
+  const [taxaFixa, setTaxaFixa] = useState("0.40");
+  const [taxaCliente, setTaxaCliente] = useState("2");
+
+  const V = parseFloat(bruto) || 0;
+  const f = (parseFloat(taxaPct) || 0) / 100;
+  const c = parseFloat(taxaFixa) || 0;
+  const p = (parseFloat(taxaCliente) || 0) / 100;
+
+  const pctFee = V * f;
+  const L = V * (1 - f) - c;
+  const cliFee = V * p;
+  const split = L > 0 ? (cliFee / L) * 100 : 0;
+  const vend = L - cliFee;
+
+  const brl = (n) => n.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+
+  const wrap = { border: "1px solid rgba(128,128,128,0.25)", borderRadius: "12px", padding: "20px", margin: "16px 0" };
+  const grid = { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: "14px", marginBottom: "20px" };
+  const lbl = { fontSize: "13px", opacity: 0.7, display: "block", marginBottom: "6px" };
+  const inp = { width: "100%", padding: "8px 10px", borderRadius: "8px", border: "1px solid rgba(128,128,128,0.3)", background: "transparent", color: "inherit", fontSize: "15px", boxSizing: "border-box" };
+  const cardRow = { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "12px", marginBottom: "16px" };
+  const card = { background: "rgba(128,128,128,0.08)", borderRadius: "8px", padding: "14px" };
+  const cardHi = { background: "rgba(55,138,221,0.12)", borderRadius: "8px", padding: "14px" };
+  const small = { fontSize: "13px", opacity: 0.7, margin: "0 0 4px" };
+  const big = { fontSize: "24px", fontWeight: 500, margin: 0 };
+  const row = { display: "flex", justifyContent: "space-between", padding: "6px 0", fontSize: "14px" };
+
+  return (
+    <div style={wrap}>
+      <div style={grid}>
+        <div><label style={lbl}>Valor bruto (R$)</label><input style={inp} type="number" step="0.01" value={bruto} onChange={(e) => setBruto(e.target.value)} /></div>
+        <div><label style={lbl}>Taxas % Fastpay</label><input style={inp} type="number" step="0.01" value={taxaPct} onChange={(e) => setTaxaPct(e.target.value)} /></div>
+        <div><label style={lbl}>Taxa fixa Fastpay (R$)</label><input style={inp} type="number" step="0.01" value={taxaFixa} onChange={(e) => setTaxaFixa(e.target.value)} /></div>
+        <div><label style={lbl}>Taxa cliente s/ bruto (%)</label><input style={inp} type="number" step="0.01" value={taxaCliente} onChange={(e) => setTaxaCliente(e.target.value)} /></div>
+      </div>
+      <div style={cardRow}>
+        <div style={card}><p style={small}>Líquido após Fastpay</p><p style={big}>{brl(L)}</p></div>
+        <div style={cardHi}><p style={small}>Split a informar (% sobre líquido)</p><p style={big}>{split.toFixed(4)}%</p></div>
+      </div>
+      <div style={{ borderTop: "1px solid rgba(128,128,128,0.2)", paddingTop: "10px" }}>
+        <div style={row}><span style={{ opacity: 0.7 }}>Fastpay % recebe</span><span>{brl(pctFee)}</span></div>
+        <div style={row}><span style={{ opacity: 0.7 }}>Fastpay taxa fixa</span><span>{brl(c)}</span></div>
+        <div style={row}><span style={{ opacity: 0.7 }}>Cliente (master) recebe</span><span>{brl(cliFee)}</span></div>
+        <div style={{ ...row, borderTop: "1px solid rgba(128,128,128,0.2)", fontWeight: 500 }}><span>Vendedor (subconta) recebe</span><span>{brl(vend)}</span></div>
+      </div>
+    </div>
+  );
+};
+
+<SplitCalculator />
+
+## Implementação
+
+A conversão em código, recebendo as taxas em fração e devolvendo o percentual de split:
+
+```ts
+interface ParametrosSplit {
+  valorBruto: number;            // ex.: 100
+  taxaPercentualFastpay: number; // ex.: 0.08 (5% transacional + 3% antecipação)
+  taxaFixaFastpay: number;       // ex.: 0.40
+  taxaClienteSobreBruto: number; // ex.: 0.02
+}
+
+function calcularSplit(p: ParametrosSplit): number {
+  const liquido =
+    p.valorBruto * (1 - p.taxaPercentualFastpay) - p.taxaFixaFastpay;
+
+  if (liquido <= 0) {
+    throw new Error("Valor líquido não positivo: taxas excedem o valor da venda.");
+  }
+
+  const valorDesejado = p.valorBruto * p.taxaClienteSobreBruto;
+  const splitPercentual = (valorDesejado / liquido) * 100;
+
+  return splitPercentual; // ex.: 2.1834 (informar à Fastpay)
+}
+```
+
+E para derivar `f` e `c` a partir da resposta do endpoint `fees-info`, selecionando a linha correta por método/moeda/bandeira e a parcela desejada:
+
+```ts
+interface FeeItem {
+  feeType: "tx_spread" | "anticipation";
+  paymentMethod: string | null;
+  currencyCode: string | null;
+  brand: string | null;
+  definition: { fixed: number; percentages: number[] };
+}
+
+interface Filtro {
+  paymentMethod: string; // ex.: "credit_card"
+  currencyCode: string;  // ex.: "BRL"
+  brand: string;         // ex.: "visa"
+  parcelas: number;      // ex.: 2
+}
+
+function obterTaxasFastpay(fees: FeeItem[], filtro: Filtro) {
+  const escolher = (tipo: FeeItem["feeType"]) => {
+    const candidatas = fees.filter(
+      (i) =>
+        i.feeType === tipo &&
+        (i.paymentMethod === filtro.paymentMethod || i.paymentMethod === null) &&
+        (i.currencyCode === filtro.currencyCode || i.currencyCode === null),
+    );
+    // override da bandeira tem prioridade; cai em brand: null quando não houver
+    return (
+      candidatas.find((i) => i.brand === filtro.brand) ??
+      candidatas.find((i) => i.brand === null)
+    );
+  };
+
+  const idx = filtro.parcelas - 1; // índice 0 = 1x
+  const pct = (i?: FeeItem) =>
+    i ? (i.definition.percentages[idx] ?? i.definition.percentages[0] ?? 0) : 0;
+
+  const txSpread = escolher("tx_spread");
+  const anticipation = escolher("anticipation");
+
+  return {
+    taxaPercentualFastpay: (pct(txSpread) + pct(anticipation)) / 100, // f
+    taxaFixaFastpay: (txSpread?.definition.fixed ?? 0),               // c
+  };
+}
+```
+
+<Warning>
+A taxa de antecipação raramente é um percentual fixo. Quando a antecipação é calculada por parcela e por prazo, o `f` efetivo **varia a cada transação**. Use sempre o total de taxas **realmente deduzido** naquela transação para chegar ao líquido — não um percentual presumido — antes de fechar o percentual de split.
+</Warning>
+
+<Note>
+O percentual de split carrega arredondamento (ex.: `2,1834%`). Arredonde para 2 casas o **valor resultante** em reais no fechamento, e não a alíquota, para evitar diferenças de centavos em valores altos.
+</Note>

@@ -17,13 +17,29 @@
       {
         "tab": "Guias",
         "groups": [
-          { "group": "Introdução", "pages": ["index"] },
-          { "group": "Autenticação", "pages": ["guias/autenticacao"] },
+          {
+            "group": "Introdução",
+            "pages": [
+              "index"
+            ]
+          },
+          {
+            "group": "Autenticação",
+            "pages": [
+              "guias/autenticacao"
+            ]
+          },
           {
             "group": "Recursos",
             "pages": [
               "guias/assinaturas",
-              "guias/fast-connect",
+              {
+                "group": "Fast Connect",
+                "pages": [
+                  "guias/fast-connect",
+                  "guias/fast-connect/calculo-split"
+                ]
+              },
               "guias/apple-pay",
               "guias/three-ds-sdk",
               "guias/estorno",
@@ -50,7 +66,10 @@
   },
   "navbar": {
     "links": [
-      { "label": "Painel FastPay", "href": "https://www.fastpaybrasil.com/" }
+      {
+        "label": "Painel FastPay",
+        "href": "https://www.fastpaybrasil.com/"
+      }
     ]
   },
   "footer": {
