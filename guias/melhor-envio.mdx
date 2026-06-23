@@ -1,0 +1,264 @@
+---
+title: "Melhor Envio"
+description: "Cálculo de frete ao vivo no checkout de links de pagamento via Melhor Envio."
+---
+
+A integração com o [Melhor Envio](https://melhorenvio.com.br) permite que cada
+vendedor (merchant) conecte sua própria conta via OAuth e ofereça **cálculo de
+frete ao vivo no checkout** dos links de pagamento. O comprador informa o CEP,
+escolhe entre as transportadoras curadas pelo vendedor, e o valor do frete é
+recalculado e validado no servidor antes de criar a cobrança.
+
+Use esta integração quando você vende **produtos físicos** em **BRL** e quer
+mostrar opções reais de transportadoras (Correios PAC/SEDEX, Jadlog, etc.) com
+prazos e preços calculados em tempo real, em vez de cobrar um valor fixo de
+frete.
+
+<Note>
+A integração é **por merchant**: cada vendedor cria seu próprio app no Melhor
+Envio e conecta com as credenciais dele. A FastPay não compartilha uma conta
+única entre lojistas.
+</Note>
+
+## Como funciona
+
+```mermaid
+flowchart TD
+    Dash[Painel do vendedor] -->|1. Salva Client ID/Secret| API[FastPay API]
+    API -->|2. Redirect OAuth| ME[Melhor Envio]
+    ME -->|3. Callback com code| API
+    API -->|4. Token + refresh<br/>criptografado no banco| DB[(merchant_melhor_envio_configs)]
+    Buyer[Comprador no checkout] -->|5. POST /freight/quote<br/>com CEP| API
+    API -->|6. Calcula frete| ME
+    ME -->|7. Opções filtradas<br/>por enabled_services| Buyer
+    Buyer -->|8. POST /charge<br/>com freightServiceId| API
+    API -->|9. Re-cota e valida<br/>(anti-fraude)| ME
+    API -->|10. Persiste freight_amount<br/>+ freight_details na charge| DB
+```
+
+1. O vendedor cria um app no Melhor Envio, cadastra Client ID/Secret no painel
+   da FastPay e completa o fluxo OAuth.
+2. No link de pagamento configurado com modo de frete **checkout**, o checkout
+   chama `POST /v1/payment-links/:id/freight/quote` com o CEP do comprador.
+3. O comprador escolhe uma das opções e envia o `freightServiceId` ao criar a
+   cobrança.
+4. A FastPay **re-cota** o frete no servidor com o mesmo `freightServiceId` e
+   grava `freight_amount` + `freight_details` na cobrança. Se o `freightServiceId`
+   não estiver mais disponível ou tiver sido manipulado, a cobrança é rejeitada.
+
+## Pré-requisitos
+
+- Conta no [Melhor Envio](https://melhorenvio.com.br) (sandbox ou produção).
+- Produtos físicos com **largura, altura, comprimento e peso** preenchidos. Sem
+  dimensões cadastradas, a cotação falha.
+- Link de pagamento em **BRL**. Cálculo de frete não está disponível em outras
+  moedas.
+
+## Etapa 1 — Criar o app no Melhor Envio
+
+1. Acesse o painel de desenvolvedor do Melhor Envio:
+   - Sandbox: `https://sandbox.melhorenvio.com.br/painel/gerenciar/tokens`
+   - Produção: `https://melhorenvio.com.br/painel/gerenciar/tokens`
+2. Crie um novo app e informe a **URL de callback** exibida no painel da
+   FastPay (formato: `https://<api-fastpay>/v1/melhor-envio/oauth/callback`).
+3. Marque o escopo **`shipping-calculate`** — é o único necessário para cotar
+   fretes.
+4. Salve o app e copie o **Client ID** e o **Client Secret** gerados.
+
+## Etapa 2 — Conectar no painel da FastPay
+
+1. No painel, acesse **Integrações → Melhor Envio**.
+2. Cole o **Client ID** e o **Client Secret** do app criado e salve.
+3. Clique em **Conectar** — você será redirecionado ao Melhor Envio para
+   autorizar a FastPay a calcular fretes em seu nome.
+4. Após autorizar, o Melhor Envio redireciona de volta ao painel e a integração
+   fica com status **ativa**.
+
+A partir desse momento, a flag `hasActiveFreightTool` do merchant fica `true`,
+desbloqueando a opção **Cálculo no checkout** ao criar links de pagamento com
+produtos físicos.
+
+<Warning>
+O Client Secret e os tokens OAuth são armazenados **criptografados**. Eles nunca
+são retornados em respostas da API. Se você precisar trocar de app, gere novas
+credenciais no Melhor Envio e salve-as novamente — o app antigo pode ser
+revogado.
+</Warning>
+
+## Etapa 3 — Configurar CEP de origem e transportadoras
+
+Após conectar, configure:
+
+- **CEP de origem** (`originPostalCode`): de onde os pedidos saem. Aceita
+  `00000-000` ou `00000000`.
+- **Serviços habilitados** (`enabledServices`): lista de IDs de serviços do
+  Melhor Envio (Correios PAC, SEDEX, Jadlog, etc.) que aparecerão no checkout.
+  Apenas os IDs nesta lista são oferecidos ao comprador, mesmo que o Melhor
+  Envio retorne outros.
+
+Use `GET /v1/melhor-envio/services` para listar todos os serviços disponíveis
+para a conta conectada e escolher quais habilitar.
+
+```bash
+curl https://api-global.fastpaybrasil.com/v1/melhor-envio/services \
+  -H "Authorization: Bearer <jwt-do-merchant>"
+```
+
+```json
+[
+  { "id": 1, "name": "PAC", "company": { "id": 1, "name": "Correios" } },
+  { "id": 2, "name": "SEDEX", "company": { "id": 1, "name": "Correios" } },
+  { "id": 3, "name": ".Package", "company": { "id": 2, "name": "Jadlog" } }
+]
+```
+
+Salve a configuração:
+
+```bash
+curl -X PUT https://api-global.fastpaybrasil.com/v1/melhor-envio/settings \
+  -H "Authorization: Bearer <jwt-do-merchant>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "originPostalCode": "01310-100",
+    "enabledServices": [1, 2, 3]
+  }'
+```
+
+## Cotação no checkout
+
+O endpoint público abaixo é chamado pelo checkout do link de pagamento (não
+exige autenticação — é acessado pelo comprador):
+
+```
+POST /v1/payment-links/:id/freight/quote
+```
+
+**Body:**
+
+| Campo        | Tipo   | Obrigatório | Descrição                                       |
+| ------------ | ------ | ----------- | ----------------------------------------------- |
+| `postalCode` | string | Sim         | CEP de destino. Aceita `00000-000` ou `00000000`. |
+
+**Exemplo:**
+
+```bash
+curl -X POST https://api-global.fastpaybrasil.com/v1/payment-links/pl_abc123/freight/quote \
+  -H "Content-Type: application/json" \
+  -d '{ "postalCode": "20040-020" }'
+```
+
+**Resposta:**
+
+```json
+{
+  "options": [
+    {
+      "serviceId": 1,
+      "name": "PAC",
+      "company": "Correios",
+      "price": 27.5,
+      "deliveryTime": 7,
+      "currency": "BRL"
+    },
+    {
+      "serviceId": 2,
+      "name": "SEDEX",
+      "company": "Correios",
+      "price": 42.9,
+      "deliveryTime": 2,
+      "currency": "BRL"
+    }
+  ]
+}
+```
+
+Apenas serviços presentes em `enabledServices` aparecem aqui. Resultados são
+cacheados por 15 minutos por combinação (link, CEP, itens).
+
+### Restrições
+
+- O link precisa estar no modo de frete **`checkout`**. Outros modos
+  (frete fixo, retirada, gratuito) não usam este endpoint.
+- O link precisa estar em **BRL**. Em outras moedas a resposta é `422`.
+- O link precisa ter pelo menos um produto **físico** com dimensões e peso.
+
+## Criando a cobrança com frete
+
+Ao criar a cobrança via `POST /v1/payment-links/:id/charge`, envie **apenas**
+o `freightServiceId` escolhido pelo comprador. O servidor recalcula o preço.
+
+```json
+{
+  "paymentMethod": { "type": "pix" },
+  "shippingAddress": {
+    "postalCode": "20040-020",
+    "street": "Av. Rio Branco",
+    "number": "1",
+    "city": "Rio de Janeiro",
+    "state": "RJ",
+    "country": "BRA"
+  },
+  "freightServiceId": 2
+}
+```
+
+<Warning>
+**Não envie** `freight_amount` ou `freight_details` no corpo do request — esses
+campos são determinados pelo servidor. A FastPay refaz a cotação no Melhor
+Envio com o `freightServiceId` enviado e valida que a opção ainda está
+disponível para aquele CEP, itens e configuração do merchant. Isso evita
+manipulação de preço por clientes maliciosos.
+</Warning>
+
+A cobrança resultante persiste:
+
+- `freight_amount` — valor do frete em BRL.
+- `freight_details` — objeto com `provider`, `serviceId`, `serviceName`,
+  `company`, `price` e `deliveryTime`.
+
+Os campos brutos de cotação são **omitidos do DTO público do link** — o
+checkout só recebe a lista de opções via `/freight/quote`, e o `freightServiceId`
+escolhido é a única referência que trafega de volta.
+
+## Verificar disponibilidade
+
+Antes de oferecer o modo de frete no checkout, o painel verifica se o merchant
+tem alguma ferramenta de frete ativa (hoje apenas Melhor Envio):
+
+```
+GET /v1/payment-links/freight-availability?merchantId=<id>
+```
+
+```json
+{ "hasFreightTool": true }
+```
+
+`hasFreightTool` fica `true` assim que uma conexão Melhor Envio do merchant
+está com status `active`.
+
+## Desconectar
+
+```bash
+curl -X DELETE https://api-global.fastpaybrasil.com/v1/melhor-envio \
+  -H "Authorization: Bearer <jwt-do-merchant>"
+```
+
+Marca a integração como `inactive`. Links já criados continuam funcionando até
+serem editados, mas novos cálculos de frete falham até que uma nova conexão
+seja estabelecida.
+
+## Endpoints
+
+| Método   | Caminho                                       | Descrição                                  |
+| -------- | --------------------------------------------- | ------------------------------------------ |
+| `POST`   | `/v1/melhor-envio/credentials`                | Salva Client ID e Client Secret do app.    |
+| `GET`    | `/v1/melhor-envio/oauth/authorize`            | Retorna a URL OAuth para conectar.         |
+| `GET`    | `/v1/melhor-envio/oauth/callback`             | Callback OAuth (chamado pelo Melhor Envio).|
+| `GET`    | `/v1/melhor-envio/status`                     | Status da integração do merchant.          |
+| `GET`    | `/v1/melhor-envio/services`                   | Lista serviços disponíveis para escolher.  |
+| `PUT`    | `/v1/melhor-envio/settings`                   | Salva CEP de origem e serviços habilitados.|
+| `DELETE` | `/v1/melhor-envio`                            | Desconecta a integração.                   |
+| `POST`   | `/v1/payment-links/:id/freight/quote`         | Cota frete ao vivo no checkout (público).  |
+| `GET`    | `/v1/payment-links/freight-availability`      | Indica se o merchant tem frete ativo.      |
+
+Consulte o [API Reference](/api-reference) para os schemas completos.
