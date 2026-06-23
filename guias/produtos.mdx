@@ -1,0 +1,175 @@
+---
+title: "Produtos"
+description: "Catálogo de produtos físicos e digitais para reutilizar em Links de Pagamento."
+---
+
+O módulo de **Produtos** é o catálogo de primeira classe da FastPay. Em vez de descrever um item solto a cada link de pagamento, você cadastra cada produto uma vez (com preço, moeda, imagem, estoque e dimensões) e reaproveita esse mesmo produto em quantos links quiser.
+
+Use Produtos quando você precisa:
+
+- Vender o **mesmo item** em vários links (campanha, página de venda, link compartilhado).
+- Montar um link com **mais de um produto** (carrinho) — veja [Link de Pagamento](/guias/link-de-pagamento).
+- Controlar **estoque** ou expor **peso e dimensões** para cotação de frete.
+- Entregar **acesso digital** (URL liberada após o pagamento).
+
+<Note>
+  Os endpoints de Produtos usam o mesmo esquema de autenticação Basic do resto da API. Veja [Autenticação](/guias/autenticacao).
+</Note>
+
+## Tipos de produto
+
+Todo produto é **físico** (`physical`) ou **digital** (`digital`). O tipo determina o comportamento do checkout e quais campos fazem sentido:
+
+| Campo            | `physical` | `digital`                       |
+| ---------------- | ---------- | ------------------------------- |
+| `trackStock` / `stock` | Aplicável  | Ignorado                       |
+| `weight`, `heightCm`, `widthCm`, `lengthCm` | Usado para cotação de frete | Ignorado |
+| `productLink`    | Não usado  | URL liberada ao comprador após pagamento |
+| Endereço no checkout | Solicitado | Não solicitado                  |
+
+<Warning>
+  Um link de pagamento é **todo físico ou todo digital**. A API rejeita um link que misture tipos.
+</Warning>
+
+## Criar produto
+
+```bash
+curl -X POST "https://api-global.fastpaybrasil.com/v1/products" \
+  -H "Authorization: Basic <seu_token_base64>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "merchantId": "2RhQg9M7ZCg3X3nMb9W1kX8Q",
+    "name": "Camiseta Preta P",
+    "description": "Algodão 100%, gola careca.",
+    "price": 89.90,
+    "currency": "BRL",
+    "productType": "physical",
+    "sku": "CAM-PT-P",
+    "trackStock": true,
+    "stock": 120,
+    "weight": 0.25,
+    "heightCm": 2,
+    "widthCm": 30,
+    "lengthCm": 40
+  }'
+```
+
+### Campos
+
+| Campo         | Tipo                         | Obrigatório | Descrição                                                   |
+| ------------- | ---------------------------- | ----------- | ----------------------------------------------------------- |
+| `merchantId`  | string                       | Sim         | Merchant dono do produto.                                   |
+| `name`        | string (≤ 255)               | Sim         | Nome exibido no checkout.                                   |
+| `description` | string                       | Não         | Descrição livre.                                            |
+| `price`       | number                       | Sim         | Preço na unidade da moeda (ex.: `89.90`).                   |
+| `currency`    | string                       | Sim         | Código ISO 4217 (ex.: `BRL`).                               |
+| `productType` | `"physical"` \| `"digital"`  | Sim         | Tipo do produto.                                            |
+| `sku`         | string (≤ 64)                | Não         | Código interno para busca/identificação.                    |
+| `productLink` | string                       | Não         | URL de acesso ao produto digital.                           |
+| `trackStock`  | boolean                      | Não         | Habilita controle de estoque (somente físico).              |
+| `stock`       | integer (≥ 0)                | Não         | Quantidade disponível.                                      |
+| `weight`      | number (kg, ≥ 0)             | Não         | Peso usado em cotação de frete.                             |
+| `heightCm`    | number (cm, ≥ 0)             | Não         | Altura usada em cotação de frete.                           |
+| `widthCm`     | number (cm, ≥ 0)             | Não         | Largura usada em cotação de frete.                          |
+| `lengthCm`    | number (cm, ≥ 0)             | Não         | Comprimento usado em cotação de frete.                      |
+| `status`      | `"active"` \| `"inactive"`   | Não         | Padrão `active`. Use `PATCH` para arquivar/reativar.        |
+
+## Listar produtos
+
+```bash
+curl -X GET "https://api-global.fastpaybrasil.com/v1/products?merchantId=2RhQg9M7ZCg3X3nMb9W1kX8Q&type=physical&status=active&search=camiseta&page=1&size=20" \
+  -H "Authorization: Basic <seu_token_base64>"
+```
+
+Parâmetros suportados:
+
+- `merchantId` — filtra por merchant (uso admin).
+- `type` — `physical` ou `digital`.
+- `status` — `active` ou `inactive`.
+- `search` — busca por nome ou `sku`.
+- `page`, `size`, `orderBy` — paginação e ordenação padrão da API.
+
+## Resumo do catálogo
+
+`GET /v1/products/summary` devolve KPIs agregados (totais por tipo, ativos, arquivados) para o catálogo do merchant. Útil para painéis e validações antes de criar um link.
+
+```bash
+curl -X GET "https://api-global.fastpaybrasil.com/v1/products/summary?merchantId=2RhQg9M7ZCg3X3nMb9W1kX8Q" \
+  -H "Authorization: Basic <seu_token_base64>"
+```
+
+## Detalhar produto
+
+```bash
+curl -X GET "https://api-global.fastpaybrasil.com/v1/products/{id}" \
+  -H "Authorization: Basic <seu_token_base64>"
+```
+
+A resposta inclui um `imageUrl` assinado quando o produto tiver imagem cadastrada (veja [Imagem do produto](#imagem-do-produto)).
+
+## Atualizar produto
+
+```bash
+curl -X PUT "https://api-global.fastpaybrasil.com/v1/products/{id}" \
+  -H "Authorization: Basic <seu_token_base64>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "price": 99.90,
+    "stock": 80
+  }'
+```
+
+Todos os campos são opcionais. Campos ausentes ficam inalterados. A resposta é `204 No Content`.
+
+<Note>
+  Mudanças de preço **não** alteram retroativamente cobranças já criadas. Cada cobrança guarda um snapshot do item no momento em que foi gerada.
+</Note>
+
+## Arquivar e reativar
+
+Produtos não são removidos — eles ficam ocultos via `status`. Produtos `inactive` não podem ser adicionados a novos links.
+
+```bash
+# Arquivar
+curl -X PATCH "https://api-global.fastpaybrasil.com/v1/products/{id}/status" \
+  -H "Authorization: Basic <seu_token_base64>" \
+  -H "Content-Type: application/json" \
+  -d '{"status": "inactive"}'
+
+# Reativar
+curl -X PATCH "https://api-global.fastpaybrasil.com/v1/products/{id}/status" \
+  -H "Authorization: Basic <seu_token_base64>" \
+  -H "Content-Type: application/json" \
+  -d '{"status": "active"}'
+```
+
+A resposta é `204 No Content`.
+
+## Imagem do produto
+
+Envie uma imagem (JPEG ou PNG, até 2 MB) com `multipart/form-data`:
+
+```bash
+curl -X POST "https://api-global.fastpaybrasil.com/v1/products/{id}/image" \
+  -H "Authorization: Basic <seu_token_base64>" \
+  -F "file=@/caminho/para/camiseta.png"
+```
+
+Sempre que o produto for retornado (detalhe ou dentro de um Link de Pagamento), o campo `imageUrl` virá com uma URL assinada e temporária, pronta para uso no checkout.
+
+## Arquivo do produto digital
+
+Para produtos `digital` você também pode armazenar um arquivo a ser disponibilizado ao comprador:
+
+```bash
+curl -X POST "https://api-global.fastpaybrasil.com/v1/products/{id}/file" \
+  -H "Authorization: Basic <seu_token_base64>" \
+  -F "file=@/caminho/para/ebook.pdf"
+```
+
+Combine com `productLink` para indicar a URL pública de acesso após o pagamento.
+
+## Próximos passos
+
+- Use os produtos do catálogo em um link multi-item: [Link de Pagamento](/guias/link-de-pagamento).
+- Consulte os schemas detalhados em [API Reference](/api-reference).

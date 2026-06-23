@@ -2787,6 +2787,328 @@ paths:
                   message:
                     type: string
                     example: Card not found
+  /v1/products:
+    post:
+      summary: Create a product
+      description: |-
+        Creates a product in the merchant's catalog. Products are reusable
+        across one or more Payment Links and can be physical or digital.
+      tags:
+        - Products
+      security:
+        - basic: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NewProduct'
+      responses:
+        '201':
+          description: The product has been successfully created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Product'
+        '401':
+          description: Unauthorized - invalid credentials
+        '403':
+          description: Forbidden - insufficient permissions
+        '422':
+          description: Unprocessable Entity
+    get:
+      summary: List products
+      description: Returns a paginated list of products in the catalog.
+      tags:
+        - Products
+      security:
+        - basic: []
+      parameters:
+        - name: merchantId
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Filter by merchant (admin use).
+        - name: type
+          in: query
+          required: false
+          schema:
+            type: string
+            enum:
+              - physical
+              - digital
+          description: Filter by product type.
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum:
+              - active
+              - inactive
+          description: Filter by status.
+        - name: search
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Search by `name` or `sku`.
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 1
+        - name: size
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 10
+        - name: orderBy
+          in: query
+          required: false
+          schema:
+            type: string
+          description: |-
+            Order results by fields (comma-separated). Prefix with `-` for
+            descending order. Example: `-createdAt,name`.
+      responses:
+        '200':
+          description: Successfully retrieved the list of products
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedProductList'
+        '401':
+          description: Unauthorized - invalid credentials
+        '403':
+          description: Forbidden - insufficient permissions
+  /v1/products/summary:
+    get:
+      summary: Catalog summary (KPIs)
+      description: |-
+        Returns aggregate KPIs for the product catalog (totals by type, active
+        vs. archived). Useful for dashboards.
+      tags:
+        - Products
+      security:
+        - basic: []
+      parameters:
+        - name: merchantId
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Filter by merchant (admin use).
+      responses:
+        '200':
+          description: Catalog summary
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductSummary'
+  /v1/products/{id}:
+    get:
+      summary: Get a product
+      description: Returns a single product, including a signed `imageUrl` when set.
+      tags:
+        - Products
+      security:
+        - basic: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The product
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Product'
+        '404':
+          description: Product not found
+    put:
+      summary: Update a product
+      description: |-
+        Updates a product. All fields are optional; omitted fields are left
+        unchanged. Price changes do not affect charges already created.
+      tags:
+        - Products
+      security:
+        - basic: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateProduct'
+      responses:
+        '204':
+          description: Product updated
+        '404':
+          description: Product not found
+  /v1/products/{id}/status:
+    patch:
+      summary: Archive or reactivate a product
+      description: |-
+        Archives (`inactive`) or reactivates (`active`) a product. Archived
+        products cannot be added to new Payment Links but remain available for
+        history.
+      tags:
+        - Products
+      security:
+        - basic: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - status
+              properties:
+                status:
+                  type: string
+                  enum:
+                    - active
+                    - inactive
+      responses:
+        '204':
+          description: Product status updated
+        '404':
+          description: Product not found
+  /v1/products/{id}/image:
+    post:
+      summary: Upload product image
+      description: |-
+        Uploads a JPEG or PNG image (up to 2 MB) for the product. Subsequent
+        product responses include a signed `imageUrl`.
+      tags:
+        - Products
+      security:
+        - basic: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - file
+              properties:
+                file:
+                  type: string
+                  format: binary
+      responses:
+        '201':
+          description: Image uploaded
+  /v1/products/{id}/file:
+    post:
+      summary: Upload product file (digital)
+      description: |-
+        Uploads a file to be delivered to the buyer after payment (digital
+        products). Maximum size 2 MB.
+      tags:
+        - Products
+      security:
+        - basic: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - file
+              properties:
+                file:
+                  type: string
+                  format: binary
+      responses:
+        '201':
+          description: File uploaded
+  /v1/payment-links/freight-availability:
+    get:
+      summary: Check freight tool availability
+      description: |-
+        Reports whether the merchant has an active freight integration
+        connected. Use this before offering `freight.mode = "checkout"` on
+        a Payment Link.
+      tags:
+        - Payment Links
+      security:
+        - basic: []
+      parameters:
+        - name: merchantId
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Availability flag
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  hasFreightTool:
+                    type: boolean
+                    example: true
+  /v1/payment-links/{id}:
+    get:
+      summary: Get a Payment Link
+      description: |-
+        Returns a Payment Link with its catalog items (each with a signed
+        `imageUrl`), freight configuration and optional `priceOverride`.
+      tags:
+        - Payment Links
+      security:
+        - basic: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The Payment Link
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaymentLink'
+        '404':
+          description: Payment Link not found
 
 components:
   securitySchemes:
@@ -3406,6 +3728,15 @@ components:
           description: Array of merchants and percentages participating in Split
           items:
             $ref: '#/components/schemas/Split'
+        freightAmount:
+          type: number
+          minimum: 0
+          description: |-
+            Freight value added to the total. Used by charges created from a
+            physical Payment Link that has `freight.mode = "fixed"` or
+            `freight.mode = "checkout"`. Omit (or send `0`) when there is no
+            freight to charge.
+          example: 19.90
     Charge:
       type: object
       properties:
@@ -6120,3 +6451,334 @@ components:
                       type: number
                     description: 'Taxa percentual por parcela: índice 0 = à vista (1x) … índice 11 = 12x. Um único valor para taxas sem parcelamento.'
                     example: [2.99, 3.49, 3.99, 4.49, 4.99, 5.49, 5.99, 6.49, 6.99, 7.49, 7.99, 8.49]
+    NewProduct:
+      type: object
+      required:
+        - merchantId
+        - name
+        - price
+        - currency
+        - productType
+      properties:
+        merchantId:
+          type: string
+          description: ID of the merchant that owns the product.
+          example: 2RhQg9M7ZCg3X3nMb9W1kX8Q
+        name:
+          type: string
+          maxLength: 255
+          description: Product name shown on the checkout.
+          example: Camiseta Preta P
+        description:
+          type: string
+          description: Free-form product description.
+          example: Algodão 100%, gola careca.
+        productLink:
+          type: string
+          description: Access URL (digital products) delivered to the buyer.
+          example: https://meusite.com/area-do-aluno
+        price:
+          type: number
+          minimum: 0
+          description: Price in the currency unit (e.g., `89.90`).
+          example: 89.90
+        currency:
+          type: string
+          description: ISO 4217 currency code.
+          example: BRL
+        productType:
+          type: string
+          enum:
+            - physical
+            - digital
+          description: Product type.
+        sku:
+          type: string
+          maxLength: 64
+          description: Internal code used in search and identification.
+          example: CAM-PT-P
+        trackStock:
+          type: boolean
+          description: Enable stock tracking (physical only).
+          example: true
+        stock:
+          type: integer
+          minimum: 0
+          description: Available quantity.
+          example: 120
+        weight:
+          type: number
+          minimum: 0
+          description: Weight in kilograms, used for freight quoting.
+          example: 0.25
+        heightCm:
+          type: number
+          minimum: 0
+          description: Height in centimeters.
+          example: 2
+        widthCm:
+          type: number
+          minimum: 0
+          description: Width in centimeters.
+          example: 30
+        lengthCm:
+          type: number
+          minimum: 0
+          description: Length in centimeters.
+          example: 40
+        status:
+          type: string
+          enum:
+            - active
+            - inactive
+          description: Defaults to `active`. Use `PATCH /v1/products/{id}/status` to archive/reactivate later.
+    UpdateProduct:
+      type: object
+      description: |-
+        Patch payload for a product. All fields are optional; omit a field to
+        leave it unchanged.
+      properties:
+        name:
+          type: string
+          maxLength: 255
+        description:
+          type: string
+        productLink:
+          type: string
+        price:
+          type: number
+          minimum: 0
+        currency:
+          type: string
+        productType:
+          type: string
+          enum:
+            - physical
+            - digital
+        sku:
+          type: string
+          maxLength: 64
+        trackStock:
+          type: boolean
+        stock:
+          type: integer
+          minimum: 0
+        weight:
+          type: number
+          minimum: 0
+        heightCm:
+          type: number
+          minimum: 0
+        widthCm:
+          type: number
+          minimum: 0
+        lengthCm:
+          type: number
+          minimum: 0
+    Product:
+      type: object
+      properties:
+        id:
+          type: string
+          example: 2RhQg9M7ZCg3X3nMb9W1kX8Q
+        merchantId:
+          type: string
+          example: 2RhQg9M7ZCg3X3nMb9W1kX8Q
+        name:
+          type: string
+          example: Camiseta Preta P
+        description:
+          type: string
+          nullable: true
+        productLink:
+          type: string
+          nullable: true
+        price:
+          type: number
+          example: 89.90
+        currency:
+          type: string
+          example: BRL
+        productType:
+          type: string
+          enum:
+            - physical
+            - digital
+        sku:
+          type: string
+          nullable: true
+        trackStock:
+          type: boolean
+        stock:
+          type: integer
+          nullable: true
+        weight:
+          type: number
+          nullable: true
+        heightCm:
+          type: number
+          nullable: true
+        widthCm:
+          type: number
+          nullable: true
+        lengthCm:
+          type: number
+          nullable: true
+        status:
+          type: string
+          enum:
+            - active
+            - inactive
+        imageUrl:
+          type: string
+          nullable: true
+          description: |-
+            Signed, short-lived URL for the product image. `null` when no
+            image was uploaded.
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    PaginatedProductList:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Product'
+        page:
+          type: integer
+          example: 1
+        pages:
+          type: integer
+          example: 10
+        total:
+          type: integer
+          example: 100
+        size:
+          type: integer
+          example: 10
+    ProductSummary:
+      type: object
+      description: Aggregate KPIs for the merchant's catalog.
+      properties:
+        total:
+          type: integer
+          example: 42
+        active:
+          type: integer
+          example: 38
+        inactive:
+          type: integer
+          example: 4
+        physical:
+          type: integer
+          example: 30
+        digital:
+          type: integer
+          example: 12
+    PaymentLinkItem:
+      type: object
+      required:
+        - productId
+        - quantity
+      properties:
+        productId:
+          type: string
+          description: ID of an active catalog product owned by the merchant.
+          example: 2RhQg9M7ZCg3X3nMb9W1kX8Q
+        quantity:
+          type: integer
+          minimum: 1
+          example: 2
+    PaymentLinkItemDetail:
+      type: object
+      description: |-
+        Item as returned by `GET /v1/payment-links/{id}`. `price` and
+        `productType` are derived live from the catalog product.
+      properties:
+        productId:
+          type: string
+          example: 2RhQg9M7ZCg3X3nMb9W1kX8Q
+        name:
+          type: string
+          example: Camiseta Preta P
+        productType:
+          type: string
+          enum:
+            - physical
+            - digital
+        price:
+          type: number
+          example: 89.90
+        quantity:
+          type: integer
+          example: 2
+        imageUrl:
+          type: string
+          nullable: true
+          description: Signed image URL, or `null` when the product has no image.
+    Freight:
+      type: object
+      required:
+        - mode
+      properties:
+        mode:
+          type: string
+          enum:
+            - none
+            - fixed
+            - checkout
+          description: |-
+            * `none` — no freight (digital or pickup).
+            * `fixed` — a fixed amount added to every charge from this link.
+            * `checkout` — freight calculated at checkout via a connected freight integration. Requires `hasFreightTool = true`.
+        fixedValue:
+          type: number
+          minimum: 0
+          nullable: true
+          description: Required when `mode = "fixed"`. Ignored otherwise.
+          example: 19.90
+    PaymentLink:
+      type: object
+      description: |-
+        A Payment Link with its catalog items, freight configuration and
+        optional manual price override.
+      properties:
+        id:
+          type: string
+          example: 2RhQg9M7ZCg3X3nMb9W1kX8Q
+        merchantId:
+          type: string
+          example: 2RhQg9M7ZCg3X3nMb9W1kX8Q
+        name:
+          type: string
+          example: Kit Verão
+        currency:
+          type: string
+          example: BRL
+        price:
+          type: number
+          description: |-
+            Base amount used to create charges. Equals `priceOverride` when set,
+            otherwise equals the subtotal computed from `items[]`.
+          example: 199.00
+        priceOverride:
+          type: number
+          nullable: true
+          description: Manual override of the base price. `null` when not set.
+          example: 199.00
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/PaymentLinkItemDetail'
+        freight:
+          $ref: '#/components/schemas/Freight'
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time

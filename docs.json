@@ -33,6 +33,8 @@
             "group": "Recursos",
             "pages": [
               "guias/assinaturas",
+              "guias/produtos",
+              "guias/link-de-pagamento",
               {
                 "group": "Fast Connect",
                 "pages": [
