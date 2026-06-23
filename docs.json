@@ -47,6 +47,12 @@
             ]
           },
           {
+            "group": "Integrações",
+            "pages": [
+              "guias/melhor-envio"
+            ]
+          },
+          {
             "group": "Webhooks",
             "pages": [
               "guias/webhooks/index",
