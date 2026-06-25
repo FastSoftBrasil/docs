@@ -37,6 +37,7 @@
                 "group": "Fast Connect",
                 "pages": [
                   "guias/fast-connect",
+                  "guias/fast-connect/fees-info",
                   "guias/fast-connect/calculo-split"
                 ]
               },

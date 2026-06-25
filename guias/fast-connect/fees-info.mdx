@@ -1,0 +1,158 @@
+---
+title: "Consultar taxas e dados cadastrais da subconta"
+description: "Como ler as taxas transacionais e de antecipação, a razão social e o CNPJ de uma subconta do Fast Connect via API."
+---
+
+O endpoint **`GET /v1/fast-connect/sub-accounts/{id}/fees-info`** devolve, em uma só chamada, os dados que você precisa para exibir o custo da subconta no seu painel ou para calcular splits dinamicamente:
+
+- **`merchant.legalName`** — razão social da subconta.
+- **`merchant.companyTaxId`** — CNPJ (somente dígitos).
+- **`fees`** — lista plana das taxas próprias da subconta, com **transacional** (`tx_spread`) e **antecipação** (`anticipation`) por método de pagamento, moeda e bandeira.
+
+<Note>
+Quando o cliente master cobra uma taxa própria sobre as vendas das subcontas e quer derivar o percentual de split a partir das taxas reais da Fastpay, esta é a rota a consultar. Para o cálculo passo a passo, veja [Cálculo de split com taxa do subadquirente](/guias/fast-connect/calculo-split).
+</Note>
+
+## Quando usar
+
+- Exibir as taxas vigentes de uma subconta em um painel (sem precisar duplicar essa configuração na sua base).
+- Recuperar **razão social e CNPJ** da subconta para emissão de relatórios, conciliações ou contratos.
+- Derivar dinamicamente a taxa percentual e fixa da Fastpay para uma transação específica (método, moeda, bandeira e parcela) antes de fechar um split.
+
+## Controle de acesso
+
+A rota lê a conta autenticada pela chave secreta e decide o que retornar a partir dela. O `:id` da URL **não** é a única coisa que importa.
+
+| Chave usada | Comportamento | Erro possível |
+| --- | --- | --- |
+| **Conta master** | Resolve o `:id` por `parent_merchant_id = master` e retorna a subconta vinculada. | `403` se a master não tem `enable_fast_connect` habilitado. `404` se o `:id` não pertencer à master (id de outra master, inexistente, ou o próprio id do master). |
+| **Subconta** | Retorna **sempre** os dados da própria subconta autenticada. O `:id` informado é **ignorado**. Não depende de `enable_fast_connect`. | — |
+
+<Warning>
+Uma subconta **nunca** consegue ler dados de uma subconta irmã, mesmo informando o `:id` dela na URL — o parâmetro é ignorado quando a chave é de subconta. Da mesma forma, uma master **não** consegue sondar subcontas de outras masters: qualquer `:id` que não pertença à árvore dela responde `404`.
+</Warning>
+
+## Requisição
+
+```bash
+curl -X GET "https://api.fastpaybrasil.com/v1/fast-connect/sub-accounts/2v2TGGb4NHTQWCiMmnelz2WVOZP/fees-info" \
+  -u "sk_live_xxxxxxxxxxxxxxxx:"
+```
+
+Parâmetros:
+
+| Campo | Local | Obrigatório | Descrição |
+| --- | --- | --- | --- |
+| `id` | path | Sim para chaves da master; ignorado para chaves de subconta | Id (KSUID) da subconta a consultar. |
+
+## Resposta
+
+```json
+{
+  "merchant": {
+    "id": "2v2TGGb4NHTQWCiMmnelz2WVOZP",
+    "legalName": "ACME PAGAMENTOS DIGITAIS LTDA",
+    "companyTaxId": "12345678000190"
+  },
+  "fees": [
+    {
+      "feeType": "tx_spread",
+      "paymentMethod": "credit_card",
+      "currencyCode": "BRL",
+      "brand": null,
+      "definition": {
+        "fixed": 0.40,
+        "percentages": [2.99, 3.49, 3.99, 4.49, 4.99, 5.49, 5.99, 6.49, 6.99, 7.49, 7.99, 8.49]
+      }
+    },
+    {
+      "feeType": "tx_spread",
+      "paymentMethod": "credit_card",
+      "currencyCode": "BRL",
+      "brand": "visa",
+      "definition": {
+        "fixed": 0.40,
+        "percentages": [2.49, 2.99, 3.49, 3.99, 4.49, 4.99, 5.49, 5.99, 6.49, 6.99, 7.49, 7.99]
+      }
+    },
+    {
+      "feeType": "anticipation",
+      "paymentMethod": "credit_card",
+      "currencyCode": "BRL",
+      "brand": null,
+      "definition": {
+        "fixed": 0,
+        "percentages": [0, 1.99, 2.49, 2.99, 3.49, 3.99, 4.49, 4.99, 5.49, 5.99, 6.49, 6.99]
+      }
+    }
+  ]
+}
+```
+
+### Campos de cada item de `fees`
+
+| Campo | Tipo | Descrição |
+| --- | --- | --- |
+| `feeType` | `tx_spread` \| `anticipation` | Tipo da taxa. Só esses dois tipos são expostos por essa rota. |
+| `paymentMethod` | string \| null | Método de pagamento (ex.: `credit_card`, `pix`, `qrcode`). `null` para taxas sem método associado. |
+| `currencyCode` | string \| null | Código da moeda (ISO 4217, ex.: `BRL`, `USD`). `null` quando não se aplica. |
+| `brand` | string \| null | Bandeira do cartão (`visa`, `mastercard`, `elo`, …). **`null` representa a taxa padrão** (vale para qualquer bandeira sem override). |
+| `definition.fixed` | number | Taxa fixa por transação, na moeda do item. |
+| `definition.percentages` | number[] | Taxa percentual **por parcela**: índice `0` = à vista (1x), índice `1` = 2x, … índice `11` = 12x. Para taxas sem parcelamento, vem um único valor no array. |
+
+<Warning>
+A rota **não** mescla a taxa específica de bandeira com a taxa padrão (`brand: null`), nem faz fallback para taxas default do gateway. Selecionar a linha correta por método, moeda e bandeira — e usar o índice certo do `percentages` para a parcela da transação — é responsabilidade de quem consome.
+</Warning>
+
+Quando a subconta não tem taxas próprias configuradas, `fees` vem como array vazio.
+
+## Erros
+
+| Status | Quando ocorre |
+| --- | --- |
+| `401` | Credenciais ausentes ou inválidas. |
+| `403` | Chave de conta master sem `enable_fast_connect` habilitado. |
+| `404` | `:id` não pertence à master autenticada, é de outra master, é inexistente, ou é o próprio id do master. |
+
+## Exemplo: selecionar a taxa efetiva por bandeira e parcela
+
+```ts
+interface FeeItem {
+  feeType: "tx_spread" | "anticipation";
+  paymentMethod: string | null;
+  currencyCode: string | null;
+  brand: string | null;
+  definition: { fixed: number; percentages: number[] };
+}
+
+function taxaEfetiva(
+  fees: FeeItem[],
+  filtro: { paymentMethod: string; currencyCode: string; brand: string; parcelas: number },
+) {
+  const escolher = (tipo: FeeItem["feeType"]) => {
+    const candidatas = fees.filter(
+      (i) =>
+        i.feeType === tipo &&
+        (i.paymentMethod === filtro.paymentMethod || i.paymentMethod === null) &&
+        (i.currencyCode === filtro.currencyCode || i.currencyCode === null),
+    );
+    // override por bandeira tem prioridade; cai em brand: null se não houver
+    return (
+      candidatas.find((i) => i.brand === filtro.brand) ??
+      candidatas.find((i) => i.brand === null)
+    );
+  };
+
+  const idx = filtro.parcelas - 1; // índice 0 = 1x
+  const pct = (i?: FeeItem) =>
+    i ? (i.definition.percentages[idx] ?? i.definition.percentages[0] ?? 0) : 0;
+
+  const txSpread = escolher("tx_spread");
+  const anticipation = escolher("anticipation");
+
+  return {
+    percentual: pct(txSpread) + pct(anticipation), // ex.: 5.48 (%)
+    fixa: txSpread?.definition.fixed ?? 0,         // ex.: 0.40 (R$)
+  };
+}
+```
