@@ -43,6 +43,7 @@
               "guias/apple-pay",
               "guias/three-ds-sdk",
               "guias/estorno",
+              "guias/alertas-de-chargeback",
               "guias/bloqueio-de-transacao"
             ]
           },
