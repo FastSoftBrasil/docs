@@ -1,0 +1,192 @@
+---
+title: "Alertas de chargeback"
+description: "Como funciona o fluxo administrativo de alerta de chargeback: estorno da cobrança, débito da taxa e novos status."
+---
+
+Um **alerta de chargeback** é uma notificação antecipada que o adquirente envia indicando que o portador do cartão contestou a cobrança — antes de o chargeback ser efetivamente aberto. Ao registrar o alerta na FastPay, o sistema executa três ações em um único fluxo administrativo:
+
+1. **Estorna** a cobrança original (sempre conclui o débito no saldo, mesmo que o PSP não exponha estorno por API).
+2. **Debita do saldo disponível** do estabelecimento a **taxa de alerta de chargeback** configurada para o merchant.
+3. Marca a cobrança como `pre_chargeback`.
+
+Este fluxo é exclusivo de operadores administrativos do gateway. Lojistas visualizam os efeitos no extrato e nos filtros de status das listagens de cobranças.
+
+<Note>
+Esta rota é **administrativa** e exige a permissão `admin.chargeback_alerts.create`. Não há equivalente público para o merchant.
+</Note>
+
+## Quando usar
+
+- O adquirente enviou um alerta de chargeback (programas Verifi/Ethoca, RDR, etc.) e você quer registrar internamente o estorno preventivo da transação.
+- Você precisa cobrar do estabelecimento a taxa contratada por alerta recebido.
+- Você quer que a cobrança apareça filtrada como `pre_chargeback` nas telas de pedidos e relatórios de vendas.
+
+Se o chargeback for posteriormente confirmado pelo adquirente, a cobrança passa de `pre_chargeback` para `chargeback` no fluxo regular de contestação.
+
+## Pré-requisitos
+
+- A cobrança deve estar com `status: "paid"`.
+- A cobrança **não pode** ter um alerta de chargeback já registrado (a operação é idempotente: tentar repetir devolve `422`).
+- O estabelecimento precisa ter a **taxa de alerta de chargeback** configurada — diretamente ou via valor padrão do gateway. Sem configuração válida, a API retorna `400`.
+
+## Configurar a taxa do estabelecimento
+
+A taxa é armazenada em `merchant_settings` com a chave `chargeback_alert_fee`. O conteúdo é um JSON com valor e moeda:
+
+```json
+{
+  "amount": 25.0,
+  "currency": "BRL"
+}
+```
+
+Há dois caminhos para configurá-la:
+
+- **Painel administrativo:** abra a ficha do estabelecimento e use o modal **Custo de alerta de chargeback** para definir o valor.
+- **API administrativa:** envie um `POST /v1/merchants/:id/settings` com `name: "chargeback_alert_fee"` e `content` no formato acima.
+
+Quando não houver configuração específica do merchant, o serviço cai automaticamente para o valor padrão do gateway (`default_merchant_settings` com a mesma chave). Se nenhum dos dois existir, a chamada falha com `CHARGEBACK_ALERT_FEE_NOT_CONFIGURED`.
+
+## Gerar o alerta
+
+```
+POST /v1/charges/:id/chargeback-alert
+```
+
+Autenticação via **Bearer token** administrativo. Requer a permissão `admin.chargeback_alerts.create`.
+
+### Body (JSON)
+
+| Campo    | Tipo   | Obrigatório | Descrição                                                                  |
+| -------- | ------ | ----------- | -------------------------------------------------------------------------- |
+| `reason` | string | Não         | Motivo/observação do alerta (até 500 caracteres). Registrado para auditoria. |
+
+```json
+{
+  "reason": "Alerta Ethoca recebido em 24/06"
+}
+```
+
+### Response
+
+**HTTP 201 Created**
+
+```json
+{
+  "chargeId": "2vorkDcXyvzifL63YX09S9VqcnI",
+  "status": "pre_chargeback",
+  "refund": {
+    "id": "2RhQg9M7ZCg3X3nMb9W1kX8Q",
+    "mode": "api"
+  },
+  "alertFee": {
+    "amount": 25.0,
+    "currency": "BRL"
+  }
+}
+```
+
+| Campo            | Tipo   | Descrição                                                                                                   |
+| ---------------- | ------ | ----------------------------------------------------------------------------------------------------------- |
+| `chargeId`       | string | ID da cobrança alvo.                                                                                        |
+| `status`         | string | Novo status da cobrança. Sempre `pre_chargeback` em caso de sucesso.                                        |
+| `refund.id`      | string | ID do estorno gerado.                                                                                       |
+| `refund.mode`    | string | `api` quando o PSP confirmou o estorno; `manual` quando caiu no fluxo de estorno manual (ver abaixo).        |
+| `alertFee.amount`/`currency` | number/string | Valor e moeda da taxa debitada do saldo disponível.                                          |
+
+### Códigos de erro
+
+| HTTP | Quando ocorre                                                                                       |
+| ---- | --------------------------------------------------------------------------------------------------- |
+| 400  | Taxa de alerta não configurada ou armazenada em formato inválido (`CHARGEBACK_ALERT_FEE_NOT_CONFIGURED`). |
+| 404  | Cobrança não encontrada no gateway.                                                                 |
+| 422  | Cobrança não está paga, já foi marcada como `pre_chargeback`/`chargeback` ou já possui débito da taxa. |
+
+## Fluxo de estorno manual (fallback)
+
+Para PSPs que não expõem estorno por API, o serviço **conclui o estorno no saldo da mesma forma** (a cobrança volta para `refunded` no ledger), mas adiciona uma entrada na **fila de estornos manuais** para que o time financeiro execute a devolução por fora.
+
+Quando o response do alerta traz `refund.mode: "manual"`, é necessário acompanhar e resolver a solicitação:
+
+### Listar solicitações pendentes
+
+```
+GET /v1/manual-refund-requests
+```
+
+Requer a permissão `admin.manual_refund_requests.read`.
+
+**Query params**
+
+| Parâmetro    | Descrição                                                              |
+| ------------ | ---------------------------------------------------------------------- |
+| `status`     | Filtra por `pending`, `completed` ou `failed`.                         |
+| `merchantId` | Filtra por estabelecimento.                                            |
+| `page`, `size` | Paginação padrão.                                                    |
+
+A resposta inclui nome e e-mail do estabelecimento de cada item e um `pendingCount` global, útil para badges de notificação no painel.
+
+### Resolver uma solicitação
+
+```
+POST /v1/manual-refund-requests/:id/resolve
+```
+
+Requer a permissão `admin.manual_refund_requests.update`.
+
+**Body (JSON)**
+
+| Campo     | Tipo   | Obrigatório | Descrição                                                       |
+| --------- | ------ | ----------- | --------------------------------------------------------------- |
+| `outcome` | string | Sim         | Resultado da execução manual: `completed` ou `failed`.          |
+| `notes`   | string | Não         | Anotações livres do operador (até 500 caracteres).              |
+
+```json
+{
+  "outcome": "completed",
+  "notes": "Devolução feita pelo internet banking, comprovante #4521"
+}
+```
+
+A FastPay armazena `resolved_by_user_id`, `resolved_at` e `notes` para auditoria. O estorno em si **não é refeito** ao resolver — o saldo já foi ajustado quando o alerta foi gerado; o endpoint apenas marca a solicitação como tratada.
+
+## Reflexos no extrato e nas listagens
+
+### Extrato (`GET /v1/statement`)
+
+A taxa de alerta aparece como um lançamento dedicado:
+
+- `movement_type`: `chargeback_alert_fee`
+- `referenceType`: `chargeback_alert` — também aceito como filtro no parâmetro `referenceType` do `/v1/statement`.
+- `amount`: valor negativo (débito) na moeda configurada.
+
+```json
+{
+  "id": "2Z5C8z6n7t1f3aB9DqL5wM2X0Yk",
+  "amount": -25.0,
+  "currency": "BRL",
+  "referenceType": "chargeback_alert",
+  "description": "Taxa de alerta de chargeback - cobrança 2vorkDcXyvzifL63YX09S9VqcnI"
+}
+```
+
+### Status de cobrança
+
+Dois novos valores passam a circular em todas as APIs e webhooks que reportam `ChargeStatus`:
+
+| Status            | Significado                                                                                          |
+| ----------------- | ---------------------------------------------------------------------------------------------------- |
+| `pre_chargeback`  | Alerta de chargeback registrado: a cobrança foi estornada preventivamente e a taxa foi cobrada.       |
+| `chargeback`      | Chargeback confirmado pelo adquirente após o alerta.                                                  |
+
+Os dois status estão disponíveis no filtro `status` do `GET /v1/charges` e nos relatórios de vendas, e disparam o evento `charge.updated`.
+
+## Resumo das permissões administrativas
+
+| Permissão                                | Para quê                                                     |
+| ---------------------------------------- | ------------------------------------------------------------ |
+| `admin.chargeback_alerts.create`         | Gerar alerta de chargeback (estorno + taxa).                 |
+| `admin.manual_refund_requests.read`      | Listar a fila de estornos manuais.                           |
+| `admin.manual_refund_requests.update`    | Resolver itens da fila de estornos manuais.                  |
+
+Ao serem criadas via migração, essas permissões herdam automaticamente os grupos que já possuem `admin.refunds.manual`.

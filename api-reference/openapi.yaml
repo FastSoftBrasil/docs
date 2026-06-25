@@ -190,6 +190,8 @@ paths:
               - refunded
               - in_analysis
               - authentication_required
+              - pre_chargeback
+              - chargeback
             example: paid
         - name: merchantId
           in: query
@@ -2415,6 +2417,345 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /v1/charges/{id}/chargeback-alert:
+    post:
+      summary: Register a chargeback alert (admin)
+      description: |-
+        Administrative endpoint that records a **chargeback alert** for a paid
+        charge. In a single transaction it:
+
+        1. Refunds the charge (falling back to the manual refund queue when the
+           PSP does not expose an API refund).
+        2. Debits the **chargeback alert fee** configured for the merchant
+           (`merchant_settings.chargeback_alert_fee`, with the gateway default
+           as fallback) from the merchant's available balance and credits the
+           gateway's revenue balance.
+        3. Transitions the charge status to `pre_chargeback`.
+
+        Requires the `admin.chargeback_alerts.create` permission. The operation
+        is idempotent: a second call for the same charge returns `422`.
+
+        See [Alertas de chargeback](/guias/alertas-de-chargeback) for the full
+        flow, including the manual refund fallback.
+      tags:
+        - Chargeback Alerts
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          description: ID of the charge to register the alert against. Must be in `paid` status.
+          required: true
+          schema:
+            type: string
+            example: 2vorkDcXyvzifL63YX09S9VqcnI
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  type: string
+                  maxLength: 500
+                  description: Optional reason/notes for the alert. Stored for audit.
+                  example: Ethoca alert received on 2026-06-24
+      responses:
+        '201':
+          description: Chargeback alert registered successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - chargeId
+                  - status
+                  - refund
+                  - alertFee
+                properties:
+                  chargeId:
+                    type: string
+                    example: 2vorkDcXyvzifL63YX09S9VqcnI
+                  status:
+                    type: string
+                    enum:
+                      - pre_chargeback
+                    example: pre_chargeback
+                  refund:
+                    type: object
+                    required:
+                      - id
+                      - mode
+                    properties:
+                      id:
+                        type: string
+                        description: ID of the refund created for the charge.
+                        example: 2RhQg9M7ZCg3X3nMb9W1kX8Q
+                      mode:
+                        type: string
+                        enum:
+                          - api
+                          - manual
+                        description: |-
+                          `api` when the PSP confirmed the refund; `manual` when
+                          the request was added to the manual refund queue
+                          (`GET /v1/manual-refund-requests`).
+                        example: api
+                  alertFee:
+                    type: object
+                    required:
+                      - amount
+                      - currency
+                    properties:
+                      amount:
+                        type: number
+                        description: Fee amount debited from the merchant's available balance.
+                        example: 25.0
+                      currency:
+                        type: string
+                        description: ISO 4217 currency code of the fee.
+                        example: BRL
+        '400':
+          description: |-
+            Chargeback alert fee is not configured for the merchant or the
+            stored value is invalid (`CHARGEBACK_ALERT_FEE_NOT_CONFIGURED`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized - invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Forbidden - missing `admin.chargeback_alerts.create` permission
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Charge not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: |-
+            Charge is not in `paid` status, already has a `pre_chargeback`/`chargeback`
+            status or already has a chargeback-alert-fee movement recorded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /v1/manual-refund-requests:
+    get:
+      summary: List manual refund requests (admin)
+      description: |-
+        Lists pending and historical entries from the **manual refund queue**.
+        Entries are created automatically when `POST /v1/charges/:id/chargeback-alert`
+        falls back to a manual refund (the PSP does not support API refunds or
+        the call failed). The balance has already been refunded to the
+        cardholder's account at the FastPay ledger level — the queue tracks the
+        out-of-band action the finance team still needs to perform.
+
+        Requires the `admin.manual_refund_requests.read` permission.
+      tags:
+        - Chargeback Alerts
+      security:
+        - bearer: []
+      parameters:
+        - name: status
+          in: query
+          description: Filter by request status.
+          required: false
+          schema:
+            type: string
+            enum:
+              - pending
+              - completed
+              - failed
+        - name: merchantId
+          in: query
+          description: Filter by merchant ID.
+          required: false
+          schema:
+            type: string
+            example: 2vorkDcXyvzifL63YX09S9VqcnI
+        - name: page
+          in: query
+          description: Page number (starts at 1)
+          required: false
+          schema:
+            type: integer
+            default: 1
+        - name: size
+          in: query
+          description: Number of items per page
+          required: false
+          schema:
+            type: integer
+            default: 20
+      responses:
+        '200':
+          description: List of manual refund requests
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                          example: 2RhQg9M7ZCg3X3nMb9W1kX8Q
+                        merchantId:
+                          type: string
+                        merchantLegalName:
+                          type: string
+                          nullable: true
+                        merchantEmail:
+                          type: string
+                          nullable: true
+                        chargeId:
+                          type: string
+                        refundId:
+                          type: string
+                        amount:
+                          type: number
+                          example: 199.9
+                        currency:
+                          type: string
+                          example: BRL
+                        status:
+                          type: string
+                          enum:
+                            - pending
+                            - completed
+                            - failed
+                        reason:
+                          type: string
+                          nullable: true
+                        resolvedByUserId:
+                          type: string
+                          nullable: true
+                        resolvedAt:
+                          type: string
+                          format: date-time
+                          nullable: true
+                        notes:
+                          type: string
+                          nullable: true
+                        createdAt:
+                          type: string
+                          format: date-time
+                  page:
+                    type: integer
+                  pages:
+                    type: integer
+                  total:
+                    type: integer
+                  size:
+                    type: integer
+                  pendingCount:
+                    type: integer
+                    description: Total of requests still in `pending` status for the gateway.
+        '401':
+          description: Unauthorized - invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Forbidden - missing `admin.manual_refund_requests.read` permission
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /v1/manual-refund-requests/{id}/resolve:
+    post:
+      summary: Resolve a manual refund request (admin)
+      description: |-
+        Marks an entry in the manual refund queue as `completed` or `failed`
+        after the finance team has executed the out-of-band refund. The ledger
+        balance was already adjusted when the chargeback alert was generated;
+        this endpoint only records the operator's outcome and notes for audit.
+
+        Requires the `admin.manual_refund_requests.update` permission.
+      tags:
+        - Chargeback Alerts
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          description: ID of the manual refund request.
+          required: true
+          schema:
+            type: string
+            example: 2RhQg9M7ZCg3X3nMb9W1kX8Q
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - outcome
+              properties:
+                outcome:
+                  type: string
+                  enum:
+                    - completed
+                    - failed
+                  description: Result of the manual refund execution.
+                  example: completed
+                notes:
+                  type: string
+                  maxLength: 500
+                  description: Operator notes (proof of refund, ticket numbers, etc.).
+                  example: Refunded via internet banking, voucher #4521
+      responses:
+        '201':
+          description: Manual refund request resolved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                  status:
+                    type: string
+                    enum:
+                      - completed
+                      - failed
+        '401':
+          description: Unauthorized - invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Forbidden - missing `admin.manual_refund_requests.update` permission
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Manual refund request not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /v1/three-ds/authenticate:
     post:
       summary: Initiate 3DS authentication
@@ -2669,6 +3010,8 @@ paths:
                     - refunded
                     - in_analysis
                     - authentication_required
+                    - pre_chargeback
+                    - chargeback
                   example: paid
       responses:
         '200':
