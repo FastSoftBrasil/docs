@@ -43,11 +43,11 @@ Os webhooks de payout usam **camelCase**. O envelope é mais simples que o de co
   "data": {
     "id": "2vorkDcXyvzifL63YX09S9VqcnI",
     "merchantId": "36OO3bcGjhPjjF3tzrqOGcmQuKo",
-    "amount": 10000,
+    "amount": 100,
     "currency": "BRL",
     "status": "approved",
-    "payoutFee": 100,
-    "netAmount": 9900
+    "payoutFee": 1,
+    "netAmount": 99
   }
 }
 ```
@@ -58,11 +58,11 @@ Os webhooks de payout usam **camelCase**. O envelope é mais simples que o de co
 | ----- | ---- | --------- |
 | `id` | string | ID da solicitação de saque |
 | `merchantId` | string | ID do submerchant |
-| `amount` | number | Valor bruto solicitado (em centavos) |
+| `amount` | number | Valor bruto solicitado (em reais) |
 | `currency` | string | Código ISO da moeda (ex: `BRL`) |
 | `status` | string | Status atual (ver tabela acima) |
-| `payoutFee` | number | Taxa de saque calculada (em centavos) |
-| `netAmount` | number | Valor líquido após dedução das taxas (em centavos) |
+| `payoutFee` | number | Taxa de saque calculada (em reais) |
+| `netAmount` | number | Valor líquido após dedução das taxas (em reais) |
 | `rejectionReason` | string | Motivo da rejeição — **presente apenas em** `payout.rejected` |
 
 ---
@@ -80,11 +80,11 @@ Enviado após a aprovação da solicitação e conclusão das operações no led
   "data": {
     "id": "2vorkDcXyvzifL63YX09S9VqcnI",
     "merchantId": "36OO3bcGjhPjjF3tzrqOGcmQuKo",
-    "amount": 10000,
+    "amount": 100,
     "currency": "BRL",
     "status": "approved",
-    "payoutFee": 100,
-    "netAmount": 9900
+    "payoutFee": 1,
+    "netAmount": 99
   }
 }
 ```
@@ -100,11 +100,11 @@ Enviado quando a solicitação de saque é rejeitada pelo gateway.
   "data": {
     "id": "2vorkDcXyvzifL63YX09S9VqcnI",
     "merchantId": "36OO3bcGjhPjjF3tzrqOGcmQuKo",
-    "amount": 10000,
+    "amount": 100,
     "currency": "BRL",
     "status": "rejected",
-    "payoutFee": 100,
-    "netAmount": 9900,
+    "payoutFee": 1,
+    "netAmount": 99,
     "rejectionReason": "Documentação incompleta"
   }
 }
@@ -133,8 +133,8 @@ app.post('/webhooks/fastpay', (req, res) => {
   switch (event) {
     case 'payout.approved':
       console.log(`Saque aprovado: ${data.id}`);
-      console.log(`Valor líquido: R$ ${(data.netAmount / 100).toFixed(2)}`);
-      console.log(`Taxa: R$ ${(data.payoutFee / 100).toFixed(2)}`);
+      console.log(`Valor líquido: R$ ${data.netAmount.toFixed(2)}`);
+      console.log(`Taxa: R$ ${data.payoutFee.toFixed(2)}`);
       // Atualizar status na sua base de dados
       // Notificar o submerchant
       break;
@@ -176,20 +176,21 @@ stateDiagram-v2
     end note
 ```
 
-## Valores em Centavos
+## Valores em Reais
 
-Todos os valores monetários são enviados em **centavos**:
+Todos os valores monetários (`amount`, `payoutFee`, `netAmount`) são enviados em **reais** (BRL) — **não** em centavos. O número já é o valor em reais e aceita casas decimais:
 
-- `amount`: 10000 = R$ 100,00
-- `payoutFee`: 100 = R$ 1,00
-- `netAmount`: 9900 = R$ 99,00
+- `amount`: 100 = R$ 100,00
+- `payoutFee`: 1 = R$ 1,00
+- `netAmount`: 99 = R$ 99,00
+- com centavos: `100.50` = R$ 100,50
 
-Para converter para reais, divida por 100:
+Não é necessário dividir por 100 — use o valor diretamente:
 
 ```javascript
-const amountInReais = data.amount / 100;
-const feeInReais = data.payoutFee / 100;
-const netAmountInReais = data.netAmount / 100;
+const amountInReais = data.amount;       // já em reais
+const feeInReais = data.payoutFee;       // já em reais
+const netAmountInReais = data.netAmount; // já em reais
 ```
 
 ## Configuração de Webhooks

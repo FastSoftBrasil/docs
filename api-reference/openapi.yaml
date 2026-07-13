@@ -4427,12 +4427,12 @@ components:
         - amount
       properties:
         amount:
-          type: integer
-          description: Payout amount in cents (e.g., R$ 100.00 = 10000)
+          type: number
+          description: Payout amount in reais (BRL). Accepts decimals (e.g., 100.50 = R$ 100.50). Minimum R$ 1.00.
           minimum: 1
-          example: 10000
+          example: 100
       example:
-        amount: 10000
+        amount: 100
     CreateSubMerchantPayoutRequestResponse:
       type: object
       properties:
@@ -4454,21 +4454,21 @@ components:
           description: ID of the submerchant that requested the payout
           example: 36OO3bcGjhPjjF3tzrqOGcmQuKo
         amount:
-          type: integer
-          description: Gross amount requested (in cents)
-          example: 10000
+          type: number
+          description: Gross amount requested (in reais / BRL)
+          example: 100
         currency:
           type: string
           description: Currency (always BRL for submerchants)
           example: BRL
         payoutFee:
-          type: integer
-          description: Calculated payout fee (in cents)
-          example: 100
+          type: number
+          description: Calculated payout fee (in reais / BRL)
+          example: 1
         netAmount:
-          type: integer
-          description: Net amount that will be transferred after fee deduction
-          example: 9900
+          type: number
+          description: Net amount that will be transferred after fee deduction (in reais / BRL)
+          example: 99
         status:
           type: string
           enum:
