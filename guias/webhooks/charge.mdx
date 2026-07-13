@@ -48,11 +48,11 @@ São entregues via fila (BullMQ) a todos os webhook endpoints configurados do me
 | `id` | string | ID da cobrança |
 | `status` | string | Status atual (ver tabela acima) |
 | `psp_ref_id` | string \| null | ID de referência do PSP |
-| `amount` | number | Valor bruto em centavos |
+| `amount` | number | Valor bruto (em reais) |
 | `currency` | string | Código ISO da moeda (ex: `BRL`) |
 | `spread` | number | Spread aplicado |
 | `anticipation_fee_estimated` | number | Taxa de antecipação estimada (cartão de crédito; 0 para outros meios) |
-| `net` | number | Valor líquido em centavos |
+| `net` | number | Valor líquido (em reais) |
 | `customer` | object \| null | Dados do cliente (ver abaixo) |
 | `payment_method` | object | Dados do meio de pagamento (ver abaixo) |
 | `merchant_id` | string | ID do merchant |
@@ -142,11 +142,11 @@ Enviado imediatamente após a criação de uma nova cobrança.
     "id": "2RhQg9M7ZCg3X3nMb9W1kX8Q",
     "status": "pending",
     "psp_ref_id": null,
-    "amount": 10000,
+    "amount": 100,
     "currency": "BRL",
     "spread": 0,
     "anticipation_fee_estimated": 0,
-    "net": 9650,
+    "net": 96.5,
     "customer": {
       "id": "cu_abc123",
       "name": "Joao Silva",
@@ -183,11 +183,11 @@ Enviado quando a cobrança está aguardando pagamento (ex: PIX gerado).
     "id": "2RhQg9M7ZCg3X3nMb9W1kX8Q",
     "status": "pending",
     "psp_ref_id": "pix_e2e_abc123",
-    "amount": 10000,
+    "amount": 100,
     "currency": "BRL",
     "spread": 0,
     "anticipation_fee_estimated": 0,
-    "net": 9650,
+    "net": 96.5,
     "customer": {
       "id": "cu_abc123",
       "name": "Joao Silva",
@@ -224,11 +224,11 @@ Enviado quando o pagamento é confirmado com sucesso.
     "id": "2RhQg9M7ZCg3X3nMb9W1kX8Q",
     "status": "paid",
     "psp_ref_id": "pix_e2e_abc123",
-    "amount": 10000,
+    "amount": 100,
     "currency": "BRL",
-    "spread": 100,
+    "spread": 1,
     "anticipation_fee_estimated": 0,
-    "net": 9550,
+    "net": 95.5,
     "customer": {
       "id": "cu_abc123",
       "name": "Joao Silva",
@@ -265,11 +265,11 @@ Enviado após a conclusão bem-sucedida de um estorno.
     "id": "2RhQg9M7ZCg3X3nMb9W1kX8Q",
     "status": "refunded",
     "psp_ref_id": "pix_e2e_abc123",
-    "amount": 10000,
+    "amount": 100,
     "currency": "BRL",
-    "spread": 100,
+    "spread": 1,
     "anticipation_fee_estimated": 0,
-    "net": 9550,
+    "net": 95.5,
     "customer": {
       "id": "cu_abc123",
       "name": "Joao Silva",
@@ -319,7 +319,7 @@ O envelope **não** contém `id` nem `livemode`. O objeto `data` é o charge com
     "id": "2RhQg9M7ZCg3X3nMb9W1kX8Q",
     "status": "refused",
     "pspRefId": "card_ref_abc123",
-    "amount": 10000,
+    "amount": 100,
     "currency": "BRL",
     "spread": 0,
     "net": 0,

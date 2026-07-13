@@ -867,8 +867,8 @@ paths:
       summary: Create payout request
       description: |-
         Creates a payout request for a submerchant in the Fast Connect context.
-        
-        The amount must be provided in cents (e.g., R$ 100.00 = 10000).
+
+        The amount must be provided in reais (BRL), not cents (e.g., 100 for R$ 100.00).
         Currency is always `BRL` for submerchants.
         Destination is always PIX using the submerchant's CNPJ as key.
       tags:
