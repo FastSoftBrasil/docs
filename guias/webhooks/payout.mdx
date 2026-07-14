@@ -13,7 +13,7 @@ Eventos relacionados ao ciclo de vida das solicitações de saque para submercha
 | `payout.rejected` | Enviado quando uma solicitação de saque é rejeitada pelo gateway |
 
 <Note>
-Os webhooks de payout são enviados **apenas para submerchants** (merchants com `parent_merchant_id` configurado no Fast Connect).
+Os webhooks de payout são enviados **apenas para submerchants** (merchants com `parent_merchant_id` configurado no Fast Connect) — o **merchant raiz (master) não recebe** esses eventos.
 </Note>
 
 ## Pré-requisitos

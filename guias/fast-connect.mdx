@@ -25,7 +25,7 @@ Exemplo de notificação:
 {
   "merchantId": "2vorkDcXyvzifL63YX09S9VqcnI",
   "status": "active",
-  // Os possíveis status são: `pre_approved`, `active`, `blocked` ou `rejected`.
+  // Os possíveis status são: `pending`, `pre_approved`, `active`, `correcting`, `rejected`, `blocked` ou `inactive`.
   "date": "2026-01-13T12:39:48Z"
 }
 ```
@@ -33,7 +33,7 @@ Exemplo de notificação:
 ### Credenciamento
 
 Após criação do SubMerchant, é necessário passar pelo processo de KYC. Para isso,
-utilize o endpoint `/v1/submerchants/{id}/documents` para fazer o upload dos documentos necessários para aprovação.
+utilize o endpoint `/v1/submerchants/{id}/document` para fazer o upload dos documentos necessários para aprovação.
 
 Todo submerchant herda **taxas, permissões e configurações** do MerchantMaster no momento da criação.
 
@@ -177,7 +177,7 @@ GET /v1/payout-requests/:payoutRequestId
 
 **Filtros disponíveis:**
 - `merchantId`: Filtrar por submerchant
-- `status`: Filtrar por status (`pending`, `approved`, `rejected`)
+- `status`: Filtrar por status (`pending`, `approved`, `rejected`, `processing`)
 - `currency`: Filtrar por moeda
 - `createdAt`: Filtrar por data de criação
 - `processedAt`: Filtrar por data de processamento

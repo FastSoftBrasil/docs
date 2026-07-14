@@ -133,5 +133,5 @@ app.post('/webhooks/fastpay/conta', (req, res) => {
 ```
 
 <Warning>
-Sua aplicação deve responder com HTTP `200` em até alguns segundos. Falhas de entrega podem ser retentadas. Implemente idempotência usando o par `merchantId` + `date` como chave de deduplicação, pois o mesmo evento pode ser entregue mais de uma vez.
+Sua aplicação deve responder com qualquer status **inferior a 400** (2xx ou 3xx) — é assim que o gateway considera a entrega como bem-sucedida. Falhas de entrega podem ser retentadas. Implemente idempotência usando o par `merchantId` + `date` como chave de deduplicação, pois o mesmo evento pode ser entregue mais de uma vez.
 </Warning>

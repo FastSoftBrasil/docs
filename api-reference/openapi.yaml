@@ -654,7 +654,10 @@ paths:
     post:
       summary: Upload submerchant documents
       description: |-
-        Upload submerchant documents to approval
+        Envia documentos da subconta para análise/aprovação.
+
+        Cada arquivo deve ser um dos formatos: **JPEG, JPG, PNG, GIF, BMP, WEBP ou PDF**, com no máximo **50MB** por arquivo.
+        Após a subconta ser **aprovada**, novos uploads são **bloqueados** (retorna `422`).
       tags:
         - FastConnect
       security:
@@ -703,7 +706,9 @@ paths:
                     type: string
                     example: Forbidden
         '422':
-          description: Unprocessable Entity
+          description: >-
+            Unprocessable Entity — tipo/formato de arquivo inválido, arquivo acima de 50MB,
+            ou upload após a subconta já ter sido aprovada (bloqueado).
           content:
             application/json:
               schema:
@@ -735,7 +740,10 @@ paths:
     get:
       summary: Get submerchant's API Keys
       description: |-
-        Get API keys from specified SubMerchant
+        Retorna as chaves de API (pública e secreta) da subconta.
+
+        Em **modo de teste**, as chaves têm prefixo `sk_test_` / `pk_test_`.
+        Retorna `404` quando a subconta não está ativa ou ainda não possui chaves.
       tags:
         - FastConnect
       security:
@@ -755,6 +763,19 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiKeys'
+        '404':
+          description: Subconta não encontrada, não ativa, ou sem chaves de API.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  statusCode:
+                    type: integer
+                    example: 404
+                  message:
+                    type: string
+                    example: API keys not found for this submerchant.
         '401':
           description: Unauthorized - invalid credentials
           content:
@@ -969,7 +990,10 @@ paths:
     get:
       summary: Get payout request by ID
       description: |-
-        Returns the complete details of a specific payout request.
+        Retorna os detalhes completos de uma solicitação de saque.
+
+        **Somente admin.** Contas merchant recebem `403` neste endpoint — para consultar as
+        próprias solicitações, use a listagem `GET /v1/payout-requests`.
       tags:
         - FastConnect
       security:
@@ -1053,6 +1077,7 @@ paths:
               - pending
               - approved
               - rejected
+              - processing
             example: pending
         - name: currency
           in: query
@@ -1061,22 +1086,22 @@ paths:
           schema:
             type: string
             example: BRL
-        - name: createdAt
+        - name: createdAtStart
           in: query
           required: false
-          description: Filter by creation date
+          description: Data inicial (inclusiva) do filtro por created_at
           schema:
             type: string
             format: date
             example: '2025-12-01'
-        - name: processedAt
+        - name: createdAtEnd
           in: query
           required: false
-          description: Filter by processing date
+          description: Data final (inclusiva) do filtro por created_at
           schema:
             type: string
             format: date
-            example: '2025-12-04'
+            example: '2025-12-31'
         - name: page
           in: query
           required: false
@@ -3977,6 +4002,7 @@ components:
         - address
         - phones
         - bankAccount
+        - canAccessDashboard
       properties:
         legalName:
           type: string
@@ -4013,6 +4039,7 @@ components:
           type: object
           required:
             - fullName
+            - idNumber
             - dateOfBirth
             - nationality
             - email
@@ -4062,7 +4089,6 @@ components:
               type: object
               required:
                 - addressLine1
-                - addressLine2
                 - neighborhood
                 - city
                 - state
@@ -4130,7 +4156,6 @@ components:
           description: The address of the merchant.
           required:
             - addressLine1
-            - addressLine2
             - neighborhood
             - city
             - state
@@ -4196,7 +4221,7 @@ components:
         user:
           type: object
           description: Required when canAccessDashboard is true.
-          required: [ fullName, email ]
+          required: [ fullName, email, phone ]
           properties:
             fullName:
               type: string
@@ -4208,11 +4233,20 @@ components:
               example: john.doe@example.com
             phone:
               type: string
-              description: The phone number of the user.
-              example: "+1234567890"
+              description: The phone number of the user in strict international format (E.164), e.g. +5511999999999.
+              example: "+5511999999999"
 
         bankAccount:
           type: object
+          required:
+            - bankCode
+            - agencyCode
+            - accountNumber
+            - accountDigit
+            - accountType
+            - bankName
+            - recipientName
+            - recipientDocument
           properties:
             bankCode:
               type: string
@@ -4245,11 +4279,11 @@ components:
               example: John Doe
             recipientDocument:
               type: string
-              description: The document number of the bank account recipient.
+              description: CPF or CNPJ of the bank account recipient (validated with check digits).
               example: "12345678900"
             routingNumber:
               type: string
-              description: The routing number of the bank account (for US accounts).
+              description: The routing number of the bank account (for US accounts). Optional.
               example: "021000021"
     CreatedSubMerchant:
       type: object
@@ -4321,11 +4355,29 @@ components:
           enum:
             - active
             - pending
+            - pre_approved
+            - correcting
             - inactive
             - rejected
             - blocked
           description: Current merchant status.
           example: active
+        metrics:
+          type: object
+          description: Aggregated metrics of the sub-account (returned by GET /v1/submerchants/{id}).
+          properties:
+            totalVolume:
+              type: number
+              description: Total charge volume of the sub-account (sum of charge amounts), in reais.
+              example: 15000
+            splitBalance:
+              type: number
+              description: Total split amount received by this sub-account, in reais.
+              example: 450
+            splitRate:
+              type: number
+              description: Average split percentage applied to the sub-account.
+              example: 3
         contactEmail:
           type: string
           format: email
@@ -4396,6 +4448,10 @@ components:
           type: string
           format: binary
           description: Selfie of the legal representative holding the document.
+        irs_letter:
+          type: string
+          format: binary
+          description: IRS letter — used in the LLC onboarding flow.
       minProperties: 1
     Split:
       type: object
@@ -4509,6 +4565,14 @@ components:
           format: date-time
           description: Last update date/time
           example: "2025-12-04T18:45:52.988Z"
+        merchantLegalName:
+          type: string
+          description: Legal name of the submerchant (included in the list response).
+          example: ACME PAGAMENTOS LTDA
+        merchantEmail:
+          type: string
+          description: Contact email of the submerchant (included in the list response).
+          example: contato@acme.com
     PaginatedPayoutRequestList:
       type: object
       properties:
@@ -4533,6 +4597,10 @@ components:
           type: integer
           description: Number of payout requests per page
           example: 10
+        pendingCount:
+          type: integer
+          description: Total number of payout requests in `pending` status (across all pages).
+          example: 3
     ErrorResponse:
       type: object
       properties:
