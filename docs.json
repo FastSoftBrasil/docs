@@ -30,6 +30,12 @@
             ]
           },
           {
+            "group": "Homologação",
+            "pages": [
+              "guias/homologacao"
+            ]
+          },
+          {
             "group": "Recursos",
             "pages": [
               "guias/assinaturas",

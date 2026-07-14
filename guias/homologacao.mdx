@@ -1,0 +1,132 @@
+---
+title: "Roteiro de Homologação de Integração"
+description: "Cenários de teste obrigatórios em sandbox e as evidências a enviar para liberar a produção."
+---
+
+Este roteiro define os **cenários de teste obrigatórios** que o integrador deve executar em ambiente de testes (sandbox) antes de virar para produção. Para cada cenário há o **resultado esperado** e a **evidência** que deve ser anexada ao Formulário de Homologação. A equipe FastPay valida as evidências e libera a produção.
+
+Este documento não ensina a integrar — o passo a passo técnico está na referência da API. Aqui está apenas **o que testar e o que comprovar**.
+
+## Como usar
+
+1. Ative o **modo de testes** e use as chaves `sk_test_` (ver [Autenticação](/guias/autenticacao)).
+2. Execute os cenários da(s) funcionalidade(s) que você integrou: **Cobrança sem split**, **Cobrança com split**, **FastConnect (subcontas)**, **Apple Pay** e/ou **Saques (payout)**.
+3. Para cada cenário, guarde: **corpo da requisição**, **corpo da resposta**, o **ID gerado** (cobrança, subconta ou saque) e, quando houver, o **registro do webhook recebido** e a **resposta HTTP que seu endpoint devolveu**.
+4. Preencha o Formulário de Homologação com as evidências e envie para a equipe FastPay.
+
+## Convenções de evidência
+
+- **Requisição/resposta**: JSON completo (pode omitir dados de cartão; a FastPay não precisa do PAN).
+- **Webhook**: print ou log mostrando o evento recebido e o **status HTTP < 400** que seu endpoint respondeu.
+- **Identificadores**: sempre informe o `id` da cobrança/subconta/saque para rastreio.
+- Um cenário só é considerado **testado** com a evidência anexada — "funcionou" sem evidência não homologa.
+
+---
+
+## A. Cobrança sem split (cartão de crédito + Pix)
+
+Referências: [Criar cobrança](/api-reference/charges/create-a-new-charge) · [Consultar cobranças](/api-reference/charges/get-all-charges) · [Estorno](/api-reference/charges/request-a-refund) · [Webhooks de cobrança](/guias/webhooks/charge)
+
+| Código | Cenário | Resultado esperado | Evidência a enviar |
+|---|---|---|---|
+| CHG-01 | Cobrança de cartão de crédito **aprovada à vista** (1x) | Cobrança criada com status `paid`; webhook `charge.paid` recebido | Requisição + resposta + `id` + registro do webhook |
+| CHG-02 | Cobrança de cartão **parcelada** (ex.: 3x) | Status `paid`; `installments` refletido | Requisição + resposta + `id` |
+| CHG-03 | Cobrança de cartão **recusada** (cartão de teste de recusa) | Status `refused` **na própria resposta** (recusa é síncrona; **não** há webhook de recusa) | Requisição + resposta mostrando `refused` e o motivo |
+| CHG-04 | **Pix gerado** | Status `pending`; resposta traz os dados de pagamento (copia e cola / QR); webhook `charge.pending` | Requisição + resposta (com copia e cola) + `id` + webhook |
+| CHG-05 | **Pix pago** (confirmar pagamento no sandbox) | Status evolui para `paid`; webhook `charge.paid` | Registro do webhook `charge.paid` para o mesmo `id` |
+| CHG-06 | **Consulta** da cobrança (`GET /v1/charges/:id`) | Retorna o status atual e os detalhes de pagamento; `splits` vazio | Resposta do GET |
+| CHG-07 | **Estorno total** de uma cobrança paga | Status `refunded`; webhook `charge.refunded` | Requisição de estorno + resposta + webhook |
+| CHG-08 | **Recebimento de webhook** | Seu endpoint recebe o evento e responde **HTTP < 400** (idealmente 2xx) em poucos segundos | Print/log do webhook recebido + status respondido |
+| CHG-09 | **Reenvio de webhook (sandbox)** | Evento reenviado com sucesso para o(s) endpoint(s) | Evidência do reenvio ([reenviar webhook](/api-reference/charges/resend-webhook-for-a-test-charge-sandbox)) |
+| CHG-10 | **Item físico com endereço de entrega** | Cobrança aceita com `shippingAddress`; sem o endereço, a API rejeita (comprove que seu fluxo envia o endereço) | Requisição com `shippingAddress` + resposta |
+
+<Note>
+Autenticação obrigatória em todos os cenários. 3D Secure, quando aplicável ao seu perfil, é coberto no cenário AP/3DS da sua conta — ver [3DS](/guias/three-ds-sdk).
+</Note>
+
+---
+
+## B. Cobrança com split
+
+Pré-requisito: os recebedores do split (`merchantId`) devem existir e pertencer ao seu grupo FastConnect. O split é enviado no campo `split` da cobrança, cada item com `merchantId` e `percentage` (0,01 a 100).
+
+Referências: [Cálculo do split](/guias/fast-connect/calculo-split) · [Criar cobrança](/api-reference/charges/create-a-new-charge)
+
+| Código | Cenário | Resultado esperado | Evidência a enviar |
+|---|---|---|---|
+| SPL-01 | Cobrança **com split para 1 recebedor** (ex.: 30%), aprovada | Status `paid`; `GET /v1/charges/:id` retorna `splits` com o `merchantId`, o percentual e o valor destinado | Requisição (com `split`) + resposta + GET mostrando `splits` |
+| SPL-02 | Cobrança **com split para 2 ou mais recebedores** somando até 100% | Aprovada; cada destino e percentual conferem no GET | Requisição + GET com todos os `splits` |
+| SPL-03 | Split com **percentual inválido** (0, acima de 100, ou soma inconsistente) | A API **rejeita** com erro de validação | Requisição + resposta de erro (comprovar tratamento) |
+| SPL-04 | Split para **`merchantId` inexistente ou fora do grupo** | A API **rejeita** | Requisição + resposta de erro |
+| SPL-05 | **Conferência do valor** efetivamente destinado a cada recebedor | Valor por recebedor coerente com o percentual e a base de cálculo | GET `/v1/charges/:id` com os valores de `splits` |
+| SPL-06 | Split em **Pix** e em **cartão parcelado** (se ambos forem usados) | Split aplicado corretamente nos dois métodos | Requisição + GET de cada método |
+
+---
+
+## C. FastConnect (subcontas)
+
+Referências: [FastConnect](/guias/fast-connect) · [Criar subconta](/api-reference/fastconnect/create-a-new-submerchant) · [Enviar documentos](/api-reference/fastconnect/upload-submerchant-documents) · [Chaves da subconta](/api-reference/fastconnect/get-submerchants-api-keys) · [Criar saque](/api-reference/fastconnect/create-payout-request) · [Webhooks de conta](/guias/webhooks/conta)
+
+| Código | Cenário | Resultado esperado | Evidência a enviar |
+|---|---|---|---|
+| FC-01 | **Criar subconta** com todos os campos obrigatórios (dados da empresa, representante legal, conta bancária) | Subconta criada; retorna o `id`; status inicial de análise | Requisição + resposta + `id` |
+| FC-02 | **Enviar os documentos** da subconta (um por tipo: contrato social, cartão CNPJ, documento do responsável frente e verso, selfie com documento) | Cada envio retorna sucesso; a subconta passa a ter todos os documentos | Evidência de cada upload (tipo enviado + resposta) |
+| FC-03 | **Consultar a subconta** até a aprovação | Status evolui até `active`; credenciamento concluído | Resposta da consulta mostrando `active` |
+| FC-04 | **Obter as chaves de API** da subconta (quando ativa) | Retorna as chaves da subconta | Resposta (chaves podem vir mascaradas na evidência) |
+| FC-05 | **Criar uma cobrança na subconta** usando a chave dela | Cobrança `paid` vinculada à subconta | Requisição + resposta + `id` |
+| FC-06 | **Cobrança com split** entre subcontas do grupo | Split aplicado (ver seção B) | Referência ao cenário SPL correspondente |
+| FC-07 | **Saque da subconta** (valor em **reais**, não em centavos) | Pedido de saque criado com status inicial | Requisição + resposta + `id` do saque |
+| FC-08 | **Recebimento do webhook de conta** (mudança de status da subconta) | Evento recebido e respondido com HTTP < 400 | Print/log do webhook |
+
+<Warning>
+O valor do saque é em **reais** (decimal). Enviar em centavos gera um saque muito maior do que o pretendido.
+</Warning>
+
+---
+
+## D. Apple Pay
+
+Pré-requisito: o certificado Apple Pay da empresa deve estar **cadastrado e vinculado** e o método **habilitado** (feito pela equipe FastPay). A cobrança Apple Pay é enviada como cartão de crédito acompanhada do objeto de carteira (`wallet` com o token do Apple Pay).
+
+Referências: [Apple Pay](/guias/apple-pay) · [Criar cobrança](/api-reference/charges/create-a-new-charge)
+
+| Código | Cenário | Resultado esperado | Evidência a enviar |
+|---|---|---|---|
+| AP-01 | **Obter o token de pagamento** no front (Apple Pay JS / PassKit) | Token de pagamento gerado pelo dispositivo | Estrutura do token (pode ser redigida) |
+| AP-02 | **Cobrança Apple Pay aprovada** (cartão de crédito + `wallet` com o token) | Status `paid`; a cobrança é processada como cartão | Requisição (com `wallet`) + resposta + `id` |
+| AP-03 | **Confirmação do certificado** vinculado à empresa | Certificado presente e método habilitado | Confirmação junto à equipe FastPay |
+| AP-04 | **Cobrança recusada** (usar cartão de teste de recusa; o token Apple não recusa de forma determinística) | Status `refused` na resposta | Requisição + resposta |
+| AP-05 | **Estorno** de uma cobrança Apple Pay paga | Status `refunded`; webhook `charge.refunded` | Requisição de estorno + resposta + webhook |
+| AP-06 | **Recebimento do webhook** `charge.paid` | Evento recebido e respondido com HTTP < 400 | Print/log do webhook |
+
+---
+
+## E. Saques (payout)
+
+Aplica-se ao saque da **própria conta**. Pré-requisitos: transferências habilitadas e saldo disponível. O valor é sempre em **reais** (decimal). O saque de **subconta** (FastConnect) está no cenário FC-07.
+
+Referências: [Criar saque](/api-reference/fastconnect/create-payout-request) · [Listar saques](/api-reference/fastconnect/list-payout-requests) · [Webhooks de saque](/guias/webhooks/payout)
+
+| Código | Cenário | Resultado esperado | Evidência a enviar |
+|---|---|---|---|
+| PAY-01 | **Consultar o saldo** disponível antes do saque | Retorna o saldo por moeda | Resposta da consulta de saldo |
+| PAY-02 | Criar saque via **Pix** (valor em **reais**) | Pedido de saque criado (HTTP 201) | Requisição + resposta + referência do saque |
+| PAY-03 | Criar saque via **transferência bancária** | Pedido de saque criado | Requisição + resposta |
+| PAY-04 | Saque **acima do limite** por transferência | Rejeitado com erro (ex.: "Maximum withdrawal amount is 15000") | Requisição + resposta de erro |
+| PAY-05 | **Segundo saque com um já pendente** na mesma moeda | Bloqueado (limite de 1 saque pendente por moeda) | Requisição + resposta de erro |
+| PAY-06 | **Acompanhar o status** do saque pela listagem | Status visível (`pending` / `processing` / `completed` / `failed`) | Resposta da listagem de saques |
+| PAY-07 | **Envio propositalmente em centavos** (teste de sanidade) | O integrador confirma que envia em **reais** — um valor em centavos gera saque muito maior; comprovar que o fluxo usa reais | Requisição mostrando o valor em reais |
+
+<Note>
+A consulta individual do saque é restrita; acompanhe pela **listagem**. O **webhook de saque** é enviado no fluxo de **subconta** (FastConnect) — no saque da própria conta, acompanhe o status pela listagem.
+</Note>
+
+---
+
+## Formulário de Homologação
+
+Ao final, preencha o **Formulário de Homologação de Integração** (fornecido pela equipe FastPay), com **uma linha por cenário** deste roteiro, anexando as evidências correspondentes.
+
+<Info>
+**Critério de liberação para produção:** todos os cenários obrigatórios das funcionalidades integradas com status **Aprovado**. Qualquer cenário Reprovado bloqueia a virada até correção e reenvio da evidência.
+</Info>
