@@ -1,0 +1,181 @@
+---
+title: "Link de Pagamento"
+description: "Crie um link compartilhável com um ou mais produtos do catálogo, frete e override de preço."
+---
+
+Um **Link de Pagamento** é uma página de checkout hospedada pela FastPay com URL pública. Compartilhe o link (WhatsApp, e-mail, bio social) e o comprador finaliza o pagamento sem que você precise implementar um checkout próprio.
+
+O link foi refatorado para suportar **múltiplos itens** vindos do catálogo de [Produtos](/guias/produtos), além de **frete** e **override de preço**. Você pode:
+
+- Criar um link **expresso** com um único produto inline (compatível com o fluxo antigo).
+- Criar um link **com produtos do catálogo** (`items[]`) — vários produtos com quantidade.
+- Definir **frete** (`none`, `fixed` ou `checkout`).
+- Sobrescrever o total via `priceOverride` (ex.: aplicar um desconto).
+
+## Modelo do link
+
+Cada link agora carrega três blocos novos no payload de criação e atualização:
+
+| Campo           | Tipo                              | Descrição                                                                  |
+| --------------- | --------------------------------- | -------------------------------------------------------------------------- |
+| `items`         | `PaymentLinkItem[]`               | Produtos do catálogo associados ao link (multi-item).                      |
+| `freight`       | `Freight`                         | Modo de frete e valor (quando aplicável).                                  |
+| `priceOverride` | number                            | Sobrescreve o subtotal calculado a partir dos itens.                       |
+
+### `PaymentLinkItem`
+
+```json
+{
+  "productId": "2RhQg9M7ZCg3X3nMb9W1kX8Q",
+  "quantity": 2
+}
+```
+
+- `productId` — ID de um produto **ativo** do catálogo do merchant.
+- `quantity` — inteiro positivo (`≥ 1`).
+
+O preço e o tipo de cada item são derivados **ao vivo** do produto no momento em que a cobrança é criada. Cada cobrança guarda um snapshot, então alterações posteriores no produto não afetam pagamentos já gerados.
+
+<Warning>
+  Todos os itens de um link precisam ter o **mesmo tipo** (`physical` ou `digital`). A API rejeita um link misto com `422 Unprocessable Entity`.
+</Warning>
+
+### `Freight`
+
+```json
+{
+  "mode": "fixed",
+  "fixedValue": 19.90
+}
+```
+
+| `mode`       | Quando usar                                                                    |
+| ------------ | ------------------------------------------------------------------------------ |
+| `none`       | Sem frete (produto digital ou retirada).                                       |
+| `fixed`      | Valor fixo, somado ao total em todas as cobranças do link.                     |
+| `checkout`   | Calculado no checkout via ferramenta de frete conectada ao merchant.           |
+
+Regras:
+
+- Frete só é aceito em links **físicos**. Links digitais devem usar `mode: "none"`.
+- `fixedValue` é obrigatório quando `mode = "fixed"`.
+- `mode: "checkout"` exige uma ferramenta de frete ativa no merchant (consulte a disponibilidade — veja [Disponibilidade de frete](#disponibilidade-de-frete)).
+
+### `priceOverride`
+
+Quando definido, substitui o subtotal calculado a partir dos itens. Útil para aplicar um desconto fixo, um valor promocional ou consolidar um valor combinado externamente.
+
+O frete, quando houver, **continua sendo somado** ao `priceOverride`.
+
+## Criar um link com produtos
+
+```bash
+curl -X POST "https://api-global.fastpaybrasil.com/v1/payment-links" \
+  -H "Authorization: Basic <seu_token_base64>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "merchantId": "2RhQg9M7ZCg3X3nMb9W1kX8Q",
+    "name": "Kit Verão",
+    "currency": "BRL",
+    "items": [
+      { "productId": "2RhQg9M7ZCg3X3nMb9W1kX8Q", "quantity": 2 },
+      { "productId": "2RhVx0e8eR4mJ7cD3p2YqXyZ", "quantity": 1 }
+    ],
+    "freight": { "mode": "fixed", "fixedValue": 19.90 },
+    "priceOverride": 199.00
+  }'
+```
+
+O backend valida os produtos, calcula o subtotal a partir do catálogo, aplica o `priceOverride` (se houver) e persiste o frete escolhido.
+
+## Atualizar um link
+
+`PUT /v1/payment-links/:id` aceita os mesmos blocos. Enviar `items` **substitui** a lista completa do link. Você pode enviar apenas `freight` ou apenas `priceOverride` para alterar somente esses campos.
+
+```bash
+curl -X PUT "https://api-global.fastpaybrasil.com/v1/payment-links/{id}" \
+  -H "Authorization: Basic <seu_token_base64>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "freight": { "mode": "checkout" },
+    "priceOverride": null
+  }'
+```
+
+## Detalhar um link
+
+`GET /v1/payment-links/:id` agora retorna os novos campos. Cada item vem com seu `imageUrl` assinado (URL temporária pronta para o checkout) e com o `productType` derivado do catálogo.
+
+```json
+{
+  "id": "2RhQg9M7ZCg3X3nMb9W1kX8Q",
+  "name": "Kit Verão",
+  "currency": "BRL",
+  "price": 199.00,
+  "items": [
+    {
+      "productId": "2RhQg9M7ZCg3X3nMb9W1kX8Q",
+      "name": "Camiseta Preta P",
+      "productType": "physical",
+      "price": 89.90,
+      "quantity": 2,
+      "imageUrl": "https://files.fastpaybrasil.com/products/..."
+    },
+    {
+      "productId": "2RhVx0e8eR4mJ7cD3p2YqXyZ",
+      "name": "Boné FastPay",
+      "productType": "physical",
+      "price": 49.90,
+      "quantity": 1,
+      "imageUrl": null
+    }
+  ],
+  "freight": {
+    "mode": "fixed",
+    "fixedValue": 19.90
+  },
+  "priceOverride": 199.00
+}
+```
+
+## Disponibilidade de frete
+
+Antes de oferecer `mode: "checkout"` no formulário do link, consulte se o merchant tem uma ferramenta de frete ativa:
+
+```bash
+curl -X GET "https://api-global.fastpaybrasil.com/v1/payment-links/freight-availability?merchantId=2RhQg9M7ZCg3X3nMb9W1kX8Q" \
+  -H "Authorization: Basic <seu_token_base64>"
+```
+
+```json
+{ "hasFreightTool": true }
+```
+
+Quando `hasFreightTool` é `false`, restrinja a UI ao modo `fixed` ou `none` até o merchant conectar uma ferramenta de frete.
+
+## Cobranças geradas pelo link
+
+Ao gerar uma cobrança a partir de um link, a FastPay:
+
+1. Calcula o **subtotal** a partir dos itens (preço × quantidade, lidos ao vivo do catálogo).
+2. Aplica `priceOverride` se ele estiver definido — caso contrário, usa o subtotal.
+3. Soma o **frete** (`fixed`) ou recebe o valor cobrado no checkout (`checkout`).
+4. Cria a cobrança com `freightAmount` igual ao valor de frete aplicado.
+
+O campo `freightAmount` foi adicionado em `POST /v1/charges` (opcional, `≥ 0`). Você só precisa enviá-lo manualmente quando estiver criando cobranças fora do fluxo nativo do link. Em cobranças geradas pelo próprio link, o valor é calculado pela FastPay.
+
+## Checkout do comprador
+
+O checkout hospedado foi redesenhado para suportar o novo modelo:
+
+- O **resumo do pedido** mostra cada item (thumb + nome + quantidade + preço).
+- Quando há frete, surge uma seção **Subtotal · Frete · Total**.
+- O formulário de **endereço de entrega** aparece automaticamente em links físicos e fica oculto em digitais — o tipo é derivado dos `items[]`.
+- O layout funciona tanto em desktop (resumo à esquerda) quanto em mobile (resumo expansível no topo).
+
+Você não precisa fazer nada para habilitar o novo checkout: ele é exibido automaticamente para todo link com `items[]` ou produto inline.
+
+## Próximos passos
+
+- Veja como cadastrar e atualizar produtos em [Produtos](/guias/produtos).
+- Consulte os schemas detalhados em [API Reference](/api-reference).
