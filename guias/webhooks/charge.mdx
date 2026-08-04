@@ -26,6 +26,8 @@ Eventos relacionados ao ciclo de vida das cobranças (charges) na FastPay.
 | `refunded` | Estornado |
 | `in_analysis` | Em análise antifraude |
 | `authentication_required` | Aguardando autenticação 3DS |
+| `pre_chargeback` | Alerta de pré-chargeback recebido — o portador contestou junto ao emissor antes de o chargeback ser formalizado (ver seção **Pré-chargeback** abaixo) |
+| `chargeback` | Chargeback formalizado (disputa perdida) — ver [Bloqueio de Transação](/guias/bloqueio-de-transacao) |
 
 ## Envelope padrão (charge.created / pending / paid / refunded)
 
@@ -304,6 +306,7 @@ Ele é entregue **exclusivamente** ao `postbackUrl` informado na criação da co
 
 Situações que disparam o `charge.updated`:
 - Transação bloqueada pelo fluxo de bloqueio (ver [Bloqueio de Transação](/guias/bloqueio-de-transacao))
+- **Alerta de pré-chargeback** (`status: pre_chargeback`) — ver seção **Pré-chargeback** abaixo
 - Falha de autenticação 3DS
 - Atualização de status pelo PSP (ex: recusa, falha)
 </Warning>
@@ -354,6 +357,47 @@ O envelope **não** contém `id` nem `livemode`. O objeto `data` é o charge com
 ```
 
 O campo `isBlocked` estará presente no payload quando a cobrança tiver sido bloqueada. Consulte a documentação de [Bloqueio de Transação](/guias/bloqueio-de-transacao) para entender o fluxo completo.
+
+### Pré-chargeback (alerta)
+
+Quando a FastPay recebe um **alerta de pré-chargeback** (programas tipo Ethoca/Verifi — o portador contestou a compra junto ao emissor **antes** de o chargeback ser formalizado), a cobrança passa para o status **`pre_chargeback`**. A transição é notificada via **postback `charge.updated`** (à `postbackUrl` da cobrança) — **não há evento dedicado** (`charge.pre_chargeback` não existe) e os webhook endpoints cadastrados no painel **não** recebem esse evento.
+
+O objeto `data` inclui dois campos específicos do alerta:
+
+| Campo | Tipo | Descrição |
+| ----- | ---- | --------- |
+| `chargebackAlertRefunded` | boolean \| null | `true` = o valor **já foi estornado** ao portador como parte do tratamento do alerta; `false` = disputa aberta **sem** estorno |
+| `chargebackAlertReason` | string \| null | Motivo/referência informado no alerta (ex.: `"Chargeback - NSU 123456789"`) |
+
+**Com ou sem estorno.** Ao registrar o alerta, a FastPay usa uma flag `refund` (**default `true`**):
+
+- **Com estorno** (`refund: true`, o caso comum): o valor é devolvido imediatamente ao portador para evitar que o alerta evolua para chargeback formal (e suas taxas/penalidades). O pedido deve ser tratado como **estornado**.
+- **Sem estorno** (`refund: false`): decisão operacional de contestar/não devolver (ex.: mercadoria já entregue com prova de entrega). A disputa segue aberta; o pedido **não** deve ser marcado como estornado.
+
+Em ambos os casos o status vai para `pre_chargeback` — o estorno é uma dimensão **ortogonal** ao status, lida via `chargebackAlertRefunded`.
+
+```json
+{
+  "event": "charge.updated",
+  "data": {
+    "id": "2RhQg9M7ZCg3X3nMb9W1kX8Q",
+    "status": "pre_chargeback",
+    "chargebackAlertRefunded": true,
+    "chargebackAlertReason": "Chargeback - NSU 123456789",
+    "amount": 100,
+    "currency": "BRL",
+    "merchantId": "mer_xyz789",
+    "postbackUrl": "https://meusite.com/webhooks/fastpay",
+    "isTest": false
+  }
+}
+```
+
+<Note>
+**Tratamento recomendado.** Ao receber `charge.updated` com `status = "pre_chargeback"`:
+- `chargebackAlertRefunded = true` → marque o pedido como **estornado** (valor já devolvido ao portador);
+- `chargebackAlertRefunded = false` → marque como **em disputa**, sem estorno.
+</Note>
 
 ### Retentativas do postback legado
 

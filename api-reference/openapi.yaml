@@ -190,6 +190,8 @@ paths:
               - refunded
               - in_analysis
               - authentication_required
+              - pre_chargeback
+              - chargeback
             example: paid
         - name: merchantId
           in: query
@@ -2694,6 +2696,8 @@ paths:
                     - refunded
                     - in_analysis
                     - authentication_required
+                    - pre_chargeback
+                    - chargeback
                   example: paid
       responses:
         '200':
@@ -3445,8 +3449,26 @@ components:
             - pending
             - refused
             - failed
+            - refunded
+            - in_analysis
+            - authentication_required
+            - pre_chargeback
+            - chargeback
           description: The status of the charge
           example: paid
+        chargebackAlertRefunded:
+          type: boolean
+          nullable: true
+          description: >-
+            Presente em cobranças com alerta de pré-chargeback (`status: pre_chargeback`).
+            `true` = o valor já foi estornado ao portador como parte do tratamento do alerta;
+            `false` = disputa aberta sem estorno. `null` quando não há alerta.
+          example: true
+        chargebackAlertReason:
+          type: string
+          nullable: true
+          description: Motivo/referência informado no alerta de pré-chargeback.
+          example: "Chargeback - NSU 123456789"
         pspRefId:
           type: string
           nullable: true
