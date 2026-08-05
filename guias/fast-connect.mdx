@@ -35,6 +35,10 @@ Exemplo de notificação:
 Após criação do SubMerchant, é necessário passar pelo processo de KYC. Para isso,
 utilize o endpoint `/v1/submerchants/{id}/document` para fazer o upload dos documentos necessários para aprovação.
 
+<Note>
+O upload direto acima vincula os documentos de pessoa sempre ao **representante legal** (principal). Se a empresa tem **sócios adicionais**, os documentos de cada sócio são enviados pelo fluxo com token — veja [Sócios adicionais e documentos por sócio](#sócios-adicionais-e-documentos-por-sócio) abaixo.
+</Note>
+
 Todo submerchant herda **taxas, permissões e configurações** do MerchantMaster no momento da criação.
 
 Uma vez aprovado, o SubMerchant está apto a realizar transações.

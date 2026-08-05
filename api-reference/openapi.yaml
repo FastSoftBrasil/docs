@@ -660,6 +660,17 @@ paths:
 
         Cada arquivo deve ser um dos formatos: **JPEG, JPG, PNG, GIF, BMP, WEBP ou PDF**, com no máximo **50MB** por arquivo.
         Após a subconta ser **aprovada**, novos uploads são **bloqueados** (retorna `422`).
+
+        **Diferenciação por sócio:** esta rota **não** diferencia sócios — os documentos
+        de pessoa (`responsible_document_front`, `responsible_document_back`,
+        `selfie_with_document`) são sempre vinculados ao **representante legal**
+        (principal). Para enviar os documentos de um **sócio adicional**
+        (`additionalRepresentatives`), use o fluxo com token:
+        `POST /v1/submerchants/{merchantId}/document/upload-token` informando o
+        `legalRepresentativeId` do sócio, e envie os arquivos em
+        `POST /v1/document-uploads`. Documentos de empresa (`cnpj_card`,
+        `social_contract`, `irs_letter`) valem para a subconta como um todo,
+        por qualquer uma das rotas.
       tags:
         - FastConnect
       security:
