@@ -664,7 +664,10 @@ paths:
         **Diferenciação por sócio:** esta rota **não** diferencia sócios — os documentos
         de pessoa (`responsible_document_front`, `responsible_document_back`,
         `selfie_with_document`) são sempre vinculados ao **representante legal**
-        (principal). Para enviar os documentos de um **sócio adicional**
+        (principal). Se a subconta tem **apenas um representante** (sem sócios
+        adicionais), esta rota é tudo o que você precisa — integrações existentes
+        continuam funcionando sem nenhuma mudança. Para enviar os documentos de um
+        **sócio adicional**
         (`additionalRepresentatives`), use o fluxo com token:
         `POST /v1/submerchants/{merchantId}/document/upload-token` informando o
         `legalRepresentativeId` do sócio, e envie os arquivos em
