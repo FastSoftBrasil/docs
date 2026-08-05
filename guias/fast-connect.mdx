@@ -39,6 +39,30 @@ Todo submerchant herda **taxas, permissões e configurações** do MerchantMaste
 
 Uma vez aprovado, o SubMerchant está apto a realizar transações.
 
+### Sócios adicionais e documentos por sócio
+
+Empresas com **mais de um sócio** podem ser cadastradas com todos os sócios de uma vez: além do `legalRepresentative` (obrigatório, sempre o **representante legal**), envie o array opcional `additionalRepresentatives` na [criação da subconta](/api-reference/fastconnect/create-a-new-submerchant) — cada item com o mesmo formato do representante.
+
+A resposta da criação retorna `legalRepresentatives[]` (o principal primeiro, com `isPrimary: true`). Guarde os `id` — são eles que vinculam os documentos de cada sócio.
+
+**Fluxo de documentos por sócio:**
+
+<Steps>
+  <Step title="Emita um token de upload para o sócio">
+    [`POST /v1/submerchants/{merchantId}/document/upload-token`](/api-reference/fastconnect/create-document-upload-token) com `{ "legalRepresentativeId": "<id do sócio>" }`. Sem o campo, os documentos vinculam ao representante legal.
+  </Step>
+  <Step title="Envie os documentos com o token">
+    [`POST /v1/document-uploads`](/api-reference/fastconnect/upload-documents-with-an-upload-token) (Bearer = token, multipart com o fieldname = nome do documento: `responsible_document_front`, `responsible_document_back`, `selfie_with_document`). Reenviar substitui apenas o documento **daquele sócio**.
+  </Step>
+  <Step title="Consulte sócios e documentos">
+    [`GET /v1/submerchants/{merchantId}/legal-representatives?include=documents`](/api-reference/fastconnect/list-submerchant-legal-representatives) — retorna cada sócio com `idFront`/`idBack`/`selfie` e o status de análise. As URLs são assinadas e expiram em 1 hora.
+  </Step>
+</Steps>
+
+<Note>
+Documentos de **empresa** (`cnpj_card`, `social_contract`, `irs_letter`) não usam o vínculo por sócio — continuam valendo para a subconta como um todo.
+</Note>
+
 ## Split de Pagamentos
 
 <Note>

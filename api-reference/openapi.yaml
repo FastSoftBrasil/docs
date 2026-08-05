@@ -738,6 +738,259 @@ paths:
                   message:
                     type: string
                     example: Internal server error
+  /v1/submerchants/{merchantId}/document/upload-token:
+    post:
+      summary: Create document upload token
+      description: |-
+        Emite um **token escopado de upload** para enviar documentos da subconta
+        diretamente ao endpoint `POST /v1/document-uploads` (ex.: do navegador),
+        sem expor a chave de API.
+
+        Opcionalmente, informe `legalRepresentativeId` (um `id` retornado em
+        `legalRepresentatives` na criação da subconta, ou na listagem de
+        representantes) para vincular os **documentos de pessoa**
+        (`responsible_document_front`, `responsible_document_back`,
+        `selfie_with_document`) àquele sócio. Omitido, os documentos vinculam ao
+        **representante legal** (comportamento anterior).
+
+        O token expira em **300 segundos** (5 minutos).
+      tags:
+        - FastConnect
+      security:
+        - basic: [ ]
+      parameters:
+        - name: merchantId
+          in: path
+          required: true
+          description: Id da subconta.
+          schema:
+            type: string
+            example: 2vorkDcXyvzifL63YX09S9VqcnI
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                legalRepresentativeId:
+                  type: string
+                  description: >-
+                    Sócio ao qual os documentos de pessoa serão vinculados. Deve
+                    pertencer à subconta (senão `404`). Omitido, vincula ao
+                    representante legal.
+                  example: 2vorkEbbbCccDddEeeFffGggHhh
+      responses:
+        '201':
+          description: Token emitido
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  token:
+                    type: string
+                    description: Token de upload (use como Bearer no POST /v1/document-uploads)
+                    example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+                  expiresIn:
+                    type: integer
+                    description: Validade do token em segundos
+                    example: 300
+        '401':
+          description: Unauthorized - invalid credentials
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  statusCode:
+                    type: integer
+                    example: 401
+                  message:
+                    type: string
+                    example: Unauthorized
+        '404':
+          description: Representante legal não encontrado (não pertence à subconta)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  statusCode:
+                    type: integer
+                    example: 404
+                  message:
+                    type: string
+                    example: Representante legal não encontrado
+  /v1/document-uploads:
+    post:
+      summary: Upload documents with an upload token
+      description: |-
+        Consome o token escopado emitido por `POST /v1/submerchants/{merchantId}/document/upload-token`
+        e envia os documentos em **multipart/form-data** — o **fieldname de cada arquivo é o
+        nome do documento** (`cnpj_card`, `social_contract`, `responsible_document_front`,
+        `responsible_document_back`, `selfie_with_document`, `irs_letter`).
+
+        Autentique com o token no header `Authorization: Bearer <token>` (não é a chave de API).
+        A subconta alvo e o eventual sócio vêm **de dentro do token** — nunca do corpo.
+
+        Formatos: JPEG, JPG, PNG, GIF, BMP, WEBP ou PDF, máx. **50MB** por arquivo.
+        Reenviar um documento de pessoa **substitui apenas o documento daquele sócio**;
+        documentos de empresa (`cnpj_card`, `social_contract`, `irs_letter`) não usam o
+        vínculo por sócio.
+      tags:
+        - FastConnect
+      security:
+        - bearer: [ ]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/UploadSubMerchantDocuments'
+      responses:
+        '201':
+          description: Documentos enviados com sucesso
+        '400':
+          description: Nenhum arquivo enviado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  statusCode:
+                    type: integer
+                    example: 400
+                  message:
+                    type: string
+                    example: No file sent
+        '403':
+          description: Token inválido, expirado ou ausente
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  statusCode:
+                    type: integer
+                    example: 403
+                  message:
+                    type: string
+                    example: Forbidden
+        '422':
+          description: Tipo/formato de arquivo inválido ou arquivo acima de 50MB
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  statusCode:
+                    type: integer
+                    example: 422
+                  message:
+                    type: string
+                    example: The items list contains one of more items with invalid type.
+  /v1/submerchants/{merchantId}/legal-representatives:
+    get:
+      summary: List submerchant legal representatives
+      description: |-
+        Lista os representantes/sócios da subconta — o **principal primeiro**
+        (`isPrimary: true`) e depois os sócios adicionais.
+
+        Com `include=documents`, inclui os documentos de pessoa de cada sócio
+        (`idFront`, `idBack`, `selfie`). Chave ausente em `documents` = documento
+        **não enviado**. As `url` são **assinadas e expiram em 1 hora** — não as
+        armazene; consulte novamente quando precisar.
+
+        Retorna `404` quando a subconta não pertence ao master autenticado.
+      tags:
+        - FastConnect
+      security:
+        - basic: [ ]
+      parameters:
+        - name: merchantId
+          in: path
+          required: true
+          description: Id da subconta.
+          schema:
+            type: string
+            example: 2vorkDcXyvzifL63YX09S9VqcnI
+        - name: include
+          in: query
+          required: false
+          description: Use `documents` para incluir os documentos de cada sócio.
+          schema:
+            type: string
+            enum: [ documents ]
+            example: documents
+      responses:
+        '200':
+          description: Lista de representantes
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                          example: 2vorkEaaaBbbCccDddEeeFffGgg
+                        fullName:
+                          type: string
+                          example: Ana Principal
+                        idNumber:
+                          type: string
+                          nullable: true
+                          example: "12345678900"
+                        email:
+                          type: string
+                          example: ana@example.com
+                        isPrimary:
+                          type: boolean
+                          description: '`true` apenas no representante legal da empresa'
+                          example: true
+                        documents:
+                          type: object
+                          description: >-
+                            Presente somente com `include=documents`. Chave ausente =
+                            documento não enviado.
+                          properties:
+                            idFront:
+                              $ref: '#/components/schemas/RepresentativeDocument'
+                            idBack:
+                              $ref: '#/components/schemas/RepresentativeDocument'
+                            selfie:
+                              $ref: '#/components/schemas/RepresentativeDocument'
+        '401':
+          description: Unauthorized - invalid credentials
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  statusCode:
+                    type: integer
+                    example: 401
+                  message:
+                    type: string
+                    example: Unauthorized
+        '404':
+          description: Subconta não encontrada (não pertence ao master autenticado)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  statusCode:
+                    type: integer
+                    example: 404
+                  message:
+                    type: string
+                    example: Subconta não encontrada
   /v1/submerchants/{id}/api-keys:
     get:
       summary: Get submerchant's API Keys
@@ -4109,6 +4362,10 @@ components:
               example: M
             address:
               type: object
+              description: >-
+                Endereço do representante (opcional). Quando enviado, é aplicado ao
+                representante; quando omitido, o representante herda o endereço da
+                empresa (comportamento anterior).
               required:
                 - addressLine1
                 - neighborhood
@@ -4160,6 +4417,19 @@ components:
                     type: string
                     description: The phone number.
                     example: "5551234"
+        additionalRepresentatives:
+          type: array
+          description: |-
+            Sócios adicionais da empresa (opcional). Cada item tem o **mesmo formato**
+            do objeto `legalRepresentative`. O `legalRepresentative` continua obrigatório
+            e é sempre o **representante legal** da subconta; os adicionais são
+            cadastrados como sócios não-representantes.
+
+            Os **documentos** dos sócios não vão neste corpo — após a criação, use os
+            `id` retornados em `legalRepresentatives` (resposta) para vincular o upload
+            de documentos de cada sócio via token de upload.
+          items:
+            $ref: '#/components/schemas/NewSubMerchantRepresentative'
         contactEmail:
           type: string
           description: The contact email of the merchant.
@@ -4314,8 +4584,160 @@ components:
       properties:
         id:
           type: string
-          description: The unique identifier of the created charge
+          description: The unique identifier of the created submerchant
           example: 2vorkDcXyvzifL63YX09S9VqcnI
+        legalRepresentatives:
+          type: array
+          description: |-
+            Representantes criados — o **principal primeiro** (`isPrimary: true`) e
+            depois os sócios adicionais na ordem enviada. Use os `id` dos itens com
+            `isPrimary: false` para vincular o upload de documentos de cada sócio.
+          items:
+            type: object
+            properties:
+              id:
+                type: string
+                description: Identificador do representante/sócio
+                example: 2vorkEaaaBbbCccDddEeeFffGgg
+              fullName:
+                type: string
+                description: Nome completo
+                example: Ana Principal
+              isPrimary:
+                type: boolean
+                description: '`true` apenas no representante legal da empresa'
+                example: true
+      example:
+        id: 2vorkDcXyvzifL63YX09S9VqcnI
+        legalRepresentatives:
+          - id: 2vorkEaaaBbbCccDddEeeFffGgg
+            fullName: Ana Principal
+            isPrimary: true
+          - id: 2vorkEbbbCccDddEeeFffGggHhh
+            fullName: Bruno Sócio
+            isPrimary: false
+    NewSubMerchantRepresentative:
+      type: object
+      description: Sócio adicional — mesmo formato do objeto `legalRepresentative`.
+      required:
+        - fullName
+        - idNumber
+        - dateOfBirth
+        - nationality
+        - email
+        - motherName
+        - gender
+        - phones
+      properties:
+        fullName:
+          type: string
+          description: The full name of the representative.
+          example: Bruno Sócio
+        dateOfBirth:
+          type: string
+          format: date
+          description: The birth date of the representative.
+          example: "1985-05-10"
+        nationality:
+          type: string
+          description: The nationality of the representative.
+          example: Brazilian
+        idNumber:
+          type: string
+          description: The identification number of the representative (CPF for BR, validated with check digits).
+          example: "98765432100"
+        idType:
+          type: string
+          description: The type of identification document.
+          example: cpf
+        issuingCountry:
+          type: string
+          description: The country that issued the identification document.
+          example: BR
+        email:
+          type: string
+          description: The email address of the representative.
+          example: bruno.socio@example.com
+        motherName:
+          type: string
+          description: The mother's name of the representative.
+          example: Maria Sócio
+        gender:
+          type: string
+          enum: [ M, F ]
+          description: The gender of the representative.
+          example: M
+        address:
+          type: object
+          description: Endereço do sócio (opcional). Quando omitido, herda o endereço da empresa.
+          required:
+            - addressLine1
+            - neighborhood
+            - city
+            - state
+            - country
+            - postalCode
+          properties:
+            addressLine1:
+              type: string
+              example: 123 Main St
+            addressLine2:
+              type: string
+              example: Apt 1
+            neighborhood:
+              type: string
+              example: Downtown
+            city:
+              type: string
+              example: São Paulo
+            state:
+              type: string
+              example: SP
+            country:
+              type: string
+              example: BR
+            postalCode:
+              type: string
+              example: "01310-100"
+        phones:
+          type: array
+          description: List of phone numbers for the representative.
+          items:
+            type: object
+            required: [ type, number ]
+            properties:
+              type:
+                type: string
+                example: mobile
+              number:
+                type: string
+                example: "5551234"
+    RepresentativeDocument:
+      type: object
+      properties:
+        id:
+          type: string
+          description: Identificador do documento
+          example: 2vorkEdddEeeFffGggHhhIiiJjj
+        url:
+          type: string
+          description: URL **assinada** para visualizar o arquivo — expira em **1 hora**; não armazene.
+          example: https://storage.fastpaybrasil.com/documents/abc123?signature=...
+        status:
+          type: string
+          enum: [ approved, rejected, pending ]
+          description: Status de análise do documento
+          example: pending
+        rejectionReason:
+          type: string
+          nullable: true
+          description: Motivo da rejeição (quando `status = rejected`)
+          example: null
+        createdAt:
+          type: string
+          format: date-time
+          description: Data de envio
+          example: "2026-08-05T14:30:00.000Z"
     SubMerchant:
       type: object
       properties:
