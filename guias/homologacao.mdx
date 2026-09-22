@@ -86,7 +86,7 @@ O valor do saque é em **reais** (decimal). Enviar em centavos gera um saque mui
 
 ## D. Apple Pay
 
-Pré-requisito: o certificado Apple Pay da empresa deve estar **cadastrado e vinculado** e o método **habilitado** (feito pela equipe FastPay). A cobrança Apple Pay é enviada como cartão de crédito acompanhada do objeto de carteira (`wallet` com o token do Apple Pay).
+Pré-requisito: o(s) domínio(s) onde o botão aparece devem estar **registrados e verificados** via API (`POST /v1/apple-pay/domains` → hospedar o arquivo → `validate`), conforme o [guia de Apple Pay](/guias/apple-pay) — não é necessário conta Apple Developer nem certificados. A cobrança Apple Pay é enviada como cartão de crédito acompanhada do objeto de carteira (`wallet` com o token do Apple Pay), sempre em `BRL` e com `customer.document` presente.
 
 Referências: [Apple Pay](/guias/apple-pay) · [Criar cobrança](/api-reference/charges/create-a-new-charge)
 
@@ -94,7 +94,7 @@ Referências: [Apple Pay](/guias/apple-pay) · [Criar cobrança](/api-reference/
 |---|---|---|---|
 | AP-01 | **Obter o token de pagamento** no front (Apple Pay JS / PassKit) | Token de pagamento gerado pelo dispositivo | Estrutura do token (pode ser redigida) |
 | AP-02 | **Cobrança Apple Pay aprovada** (cartão de crédito + `wallet` com o token) | Status `paid`; a cobrança é processada como cartão | Requisição (com `wallet`) + resposta + `id` |
-| AP-03 | **Confirmação do certificado** vinculado à empresa | Certificado presente e método habilitado | Confirmação junto à equipe FastPay |
+| AP-03 | **Domínio registrado e verificado** (`GET /v1/apple-pay/domains`) | Domínio com `status: "verified"`; sessão validada pelo `POST /v1/apple-pay/validate-merchant` sem erro | Resposta do GET mostrando `verified` |
 | AP-04 | **Cobrança recusada** (usar cartão de teste de recusa; o token Apple não recusa de forma determinística) | Status `refused` na resposta | Requisição + resposta |
 | AP-05 | **Estorno** de uma cobrança Apple Pay paga | Status `refunded`; webhook `charge.refunded` | Requisição de estorno + resposta + webhook |
 | AP-06 | **Recebimento do webhook** `charge.paid` | Evento recebido e respondido com HTTP < 400 | Print/log do webhook |

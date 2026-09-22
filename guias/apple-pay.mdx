@@ -1,205 +1,206 @@
 ---
 title: "Apple Pay"
-description: "Integração de pagamentos com Apple Pay na FastPay."
+description: "Aceite Apple Pay no seu site com a FastPay sem conta Apple Developer: registre o domínio, valide a sessão e envie o token."
 ---
 
-O Apple Pay permite que clientes finalizem pagamentos em sites e aplicativos usando
-cartões já cadastrados em sua Wallet, dispensando o preenchimento manual de dados do
-cartão. Para habilitar Apple Pay na FastPay, é necessário um processo de
-credenciamento junto à Apple, no qual você cria um *Merchant ID*, valida o domínio e
-gera certificados que serão compartilhados com a FastPay.
+O Apple Pay permite que clientes paguem com cartões já cadastrados na Wallet, sem
+digitar dados do cartão. Na FastPay a integração é **pass-through**: o token
+cifrado gerado pelo dispositivo vai para a FastPay e é repassado ao processador,
+que é dono da relação com a Apple e faz a decifragem. Você **não precisa** de
+conta no Apple Developer Program, de Merchant ID nem de certificados.
 
-Este guia descreve o passo a passo completo do credenciamento.
+O fluxo tem três partes:
+
+1. Registrar o domínio onde o botão será exibido e hospedar o arquivo de verificação.
+2. No navegador, validar a sessão Apple Pay pela FastPay (`onvalidatemerchant`).
+3. Enviar o token autorizado para `POST /v1/charges`, no mesmo formato de sempre.
 
 ## Pré-requisitos
 
-Antes de começar, certifique-se de ter:
+- Chave secreta (`sk_`) para registrar domínios (chamadas de backend), vinculada a um
+  usuário com permissão para gerenciar domínios Apple Pay (os mesmos perfis que criam
+  integrações).
+- Chave pública (`pk_`) para validar a sessão a partir do navegador, vinculada a **um único
+  merchant** (uma chave compartilhada por vários merchants torna a checagem do domínio ambígua).
+- Domínio próprio servido em **HTTPS** com certificado válido, sem redirecionamento no path `/.well-known/`.
+- Botão Apple Pay pelo [Apple Pay JS SDK](https://developer.apple.com/documentation/apple_pay_on_the_web).
 
-- Uma conta ativa no [Apple Developer Program](https://developer.apple.com/programs/).
-- Um domínio próprio servindo sob **HTTPS** (com certificado SSL válido).
-- Acesso ao painel da FastPay para envio do certificado de processamento.
-- `openssl` instalado localmente para geração dos arquivos `.csr` e `.key`.
+<Note>Cada hostname é um registro próprio: `www.loja.com` e `loja.com` são domínios diferentes. Registre exatamente o hostname que o navegador mostra em `window.location.hostname`.</Note>
 
-<Note>Recomendamos criar **Merchant IDs separados** para sandbox e produção para evitar conflitos entre os ambientes durante os testes.</Note>
-
-## Visão Geral do Fluxo
+## Visão geral
 
 ```mermaid
-flowchart TD
-    Start([Iniciar Credenciamento]) --> CreateMID[Criar Merchant ID<br/>no Apple Developer]
-    CreateMID --> ValidateDomain[Validar domínio<br/>via arquivo .well-known]
-    ValidateDomain --> GenIdentityCert[Gerar Merchant<br/>Identity Certificate]
-    GenIdentityCert --> GenPaymentCert[Gerar Payment<br/>Processing Certificate]
-    GenPaymentCert --> SendToFastPay[Enviar .cer para a FastPay]
-    SendToFastPay --> Configure[FastPay configura<br/>credenciais no gateway]
-    Configure --> Ready([Apple Pay habilitado])
-
-    style Start fill:#667eea,color:#fff
-    style CreateMID fill:#667eea,color:#fff
-    style ValidateDomain fill:#ed8936,color:#fff
-    style GenIdentityCert fill:#ed8936,color:#fff
-    style GenPaymentCert fill:#ed8936,color:#fff
-    style SendToFastPay fill:#4299e1,color:#fff
-    style Configure fill:#4299e1,color:#fff
-    style Ready fill:#48bb78,color:#fff
+sequenceDiagram
+    participant B as Backend do lojista
+    participant F as FastPay
+    participant P as Processador
+    participant S as Safari (cliente)
+    B->>F: POST /v1/apple-pay/domains { domain }
+    F->>P: registra o domínio
+    P-->>F: verificationFile { path, content }
+    F-->>B: id, status pending, verificationFile
+    B->>B: hospeda o arquivo em /.well-known/
+    B->>F: POST /v1/apple-pay/domains/{id}/validate
+    F->>P: dispara a verificação
+    P-->>F: verified
+    S->>F: POST /v1/apple-pay/validate-merchant { validationUrl, domain }
+    F->>P: validate-merchant
+    P-->>F: sessão Apple (opaca)
+    F-->>S: sessão Apple (opaca)
+    S->>B: payment.token autorizado
+    B->>F: POST /v1/charges { paymentMethod.wallet }
+    F->>P: applePay.paymentData (pass-through)
+    P-->>F: paid / refused
 ```
 
-## Etapa 1 — Criação do Merchant ID
+## Etapa 1 — Registrar o domínio
 
-1. Acesse o [Apple Developer — Identifiers](https://developer.apple.com/account/resources/identifiers/list).
-2. Clique no botão **+** para registrar um novo identificador e selecione a opção **Merchant IDs**.
-3. Preencha os campos:
-
-| Campo         | Descrição                                                                          | Exemplo                                       |
-| ------------- | ---------------------------------------------------------------------------------- | --------------------------------------------- |
-| `Description` | Texto livre que descreve a finalidade do Merchant ID.                              | `Merchant ID FastPay — Sandbox`               |
-| `Identifier`  | Identificador único no formato de domínio reverso, iniciando com `merchant.`.      | `merchant.com.seudominio.fastpay.sandbox`     |
-
-4. Confirme a criação. Repita o processo para gerar um Merchant ID dedicado ao
-   ambiente de **produção** (por exemplo, `merchant.com.seudominio.fastpay.prod`).
-
-<Warning>Guarde os Merchant IDs criados — eles serão informados à FastPay ao final do credenciamento.</Warning>
-
-## Etapa 2 — Validação do Domínio
-
-Apple exige que você comprove a propriedade de todos os domínios que oferecerão o
-botão Apple Pay.
-
-1. No Apple Developer, abra o Merchant ID criado e localize a seção
-   **Merchant Domains**.
-2. Clique em **Add Domain** e informe o domínio (sem `https://`, ex: `loja.seudominio.com`).
-3. Faça o download do arquivo de validação fornecido pela Apple
-   (`apple-developer-merchantid-domain-association.txt`).
-4. Hospede o arquivo no seu domínio, exatamente no caminho:
-
-```
-https://<seu-dominio>/.well-known/apple-developer-merchantid-domain-association.txt
-```
-
-5. De volta ao painel Apple, clique em **Verify**. O status deve mudar para
-   **Verified**.
-
-<Note>O arquivo precisa estar acessível publicamente via HTTPS, com o `Content-Type` `text/plain` ou `application/octet-stream`. Se utilizar CDN ou proxy reverso, garanta que a rota `.well-known` não esteja bloqueada.</Note>
-
-## Etapa 3 — Merchant Identity Certificate
-
-Este certificado autentica seu servidor junto aos servidores da Apple durante a
-solicitação de uma sessão de pagamento.
-
-### 3.1 Gerar o CSR e a chave privada
-
-No terminal, execute:
+Chame o endpoint com a chave secreta. A resposta traz o arquivo de verificação
+que você deve hospedar.
 
 ```bash
-openssl req -out uploadMe.csr -new -newkey rsa:2048 -nodes \
-  -keyout certificate_sandbox.key
+curl -X POST https://api-global.fastpaybrasil.com/v1/apple-pay/domains \
+  -u "sk_SUA_CHAVE:" \
+  -H "Content-Type: application/json" \
+  -d '{ "domain": "checkout.minhaloja.com.br" }'
 ```
 
-- Preencha os campos solicitados (Country, State, Organization, etc).
-- Quando solicitada a **Challenge password**, deixe **em branco**.
+Resposta (`201 Created`):
 
-Ao final, você terá dois arquivos:
+```json
+{
+  "id": "2xY9...KSUID",
+  "merchantId": "2v2T...KSUID",
+  "domain": "checkout.minhaloja.com.br",
+  "provider": "uvy",
+  "status": "pending",
+  "verifiedAt": null,
+  "lastVerificationError": null,
+  "verificationFile": {
+    "path": "https://checkout.minhaloja.com.br/.well-known/apple-developer-merchantid-domain-association",
+    "content": "7B227073706964223A22..."
+  },
+  "createdAt": "2026-09-14T18:00:00.000Z",
+  "updatedAt": "2026-09-14T18:00:00.000Z"
+}
+```
 
-- `uploadMe.csr` → será enviado à Apple.
-- `certificate_sandbox.key` → **chave privada**, mantenha em local seguro.
+| Campo | Descrição |
+| --- | --- |
+| `status` | `pending` (aguardando verificação), `verified` (pronto para uso) ou `failed` (última tentativa falhou; ver `lastVerificationError`). |
+| `verificationFile.path` | Localização do arquivo informada pelo processador, quando disponível. O caminho que precisa responder é sempre o da Etapa 2. |
+| `verificationFile.content` | Conteúdo do arquivo, a ser servido **como está**, sem decodificar. |
 
-### 3.2 Upload do CSR e emissão do certificado
+Registrar o mesmo hostname de novo para o mesmo dono é idempotente: a API devolve
+o registro que já existe, em vez de criar outro ou responder `409` — inclusive
+quando a tentativa anterior falhou, caso em que o registro preservado no
+processador é reaproveitado. Se `verificationFile.content` vier `null`, o
+registro fica de pé mas não há arquivo para hospedar: fale com o suporte, em vez
+de repetir a chamada.
 
-1. No Merchant ID, abra a seção **Apple Pay Merchant Identity Certificate** e
-   clique em **Create Certificate**.
-2. Faça o upload do `uploadMe.csr`.
-3. Baixe o arquivo `merchant_id.cer` gerado pela Apple.
+<Warning>O registro do primeiro domínio muda o modelo de Apple Pay da sua conta para pass-through no mesmo instante. Se você já operava com certificado próprio, siga a ordem da seção "Migração: quem já operava com certificado próprio", no fim deste guia, antes de registrar.</Warning>
 
-### 3.3 Conversão para PEM
+## Etapa 2 — Hospedar o arquivo de verificação
 
-A FastPay e a maioria dos servidores trabalham com certificados em formato PEM.
-Converta o `.cer` com:
+Sirva `verificationFile.content` em:
+
+```
+https://<seu-dominio>/.well-known/apple-developer-merchantid-domain-association
+```
+
+Requisitos:
+
+- Path **sem extensão** (não é `.txt`).
+- `Content-Type: text/plain`.
+- HTTPS válido, resposta `200`, **sem redirect** (nem HTTP → HTTPS, nem `www`).
+- Acesso público, sem autenticação.
+
+Confira antes de validar:
 
 ```bash
-openssl x509 -inform der -in merchant_id.cer -out certificate_sandbox.pem
+curl -sI https://checkout.minhaloja.com.br/.well-known/apple-developer-merchantid-domain-association
+# HTTP/2 200
+# content-type: text/plain
 ```
 
-Ao final desta etapa, você deve ter em mãos:
-
-- `certificate_sandbox.pem` — certificado de identidade.
-- `certificate_sandbox.key` — chave privada correspondente.
-
-## Etapa 4 — Payment Processing Certificate
-
-Este certificado é responsável por **criptografar os dados do cartão** que o
-dispositivo do cliente envia para a FastPay processar a transação.
-
-### 4.1 Gerar o CSR
-
-Gere um novo CSR exclusivamente para este certificado:
+## Etapa 3 — Validar o domínio
 
 ```bash
-openssl req -out paymentProcessing.csr -new -newkey rsa:2048 -nodes \
-  -keyout payment_processing.key
+curl -X POST https://api-global.fastpaybrasil.com/v1/apple-pay/domains/{id}/validate \
+  -u "sk_SUA_CHAVE:"
 ```
 
-Novamente, **deixe a Challenge password em branco**.
+A resposta é o mesmo objeto da Etapa 1 com `status: "verified"` e `verifiedAt`
+preenchido. Se o arquivo não estiver acessível, a API responde `422` com o código
+`APPLE_PAY_DOMAIN_VERIFICATION_FAILED`, e o domínio passa a `status: "failed"`
+com o motivo em `lastVerificationError`; corrija a hospedagem e chame de novo.
+Consulte a qualquer momento com `GET /v1/apple-pay/domains` (resposta
+`{ "data": [...] }`) ou `GET /v1/apple-pay/domains/{id}`.
 
-### 4.2 Upload no Apple Developer
+## Etapa 4 — Validar a sessão no navegador
 
-1. No Merchant ID, abra **Apple Pay Payment Processing Certificate** e clique em
-   **Create Certificate**.
-2. Quando perguntado *"Will payments associated with this Merchant ID be
-   processed exclusively in China?"*, selecione **No**.
-3. Faça o upload do `paymentProcessing.csr`.
-4. Baixe o `.cer` resultante.
+No evento `onvalidatemerchant`, envie a `validationURL` da Apple e o hostname da
+página para a FastPay, autenticando com a chave pública. Devolva a sessão à
+Apple **sem modificar**.
 
-### 4.3 Envio para a FastPay
+```javascript
+const session = new ApplePaySession(3, {
+  countryCode: 'BR',
+  currencyCode: 'BRL',
+  supportedNetworks: ['visa', 'masterCard'],
+  merchantCapabilities: ['supports3DS'],
+  total: { label: 'Minha Loja', amount: '100.50' },
+});
 
-Envie para a equipe da FastPay:
+session.onvalidatemerchant = async (event) => {
+  try {
+    const response = await fetch(
+      'https://api-global.fastpaybrasil.com/v1/apple-pay/validate-merchant',
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: 'Basic ' + btoa('pk_SUA_CHAVE_PUBLICA:'),
+        },
+        body: JSON.stringify({
+          validationUrl: event.validationURL,
+          domain: window.location.hostname,
+        }),
+      },
+    );
+    if (!response.ok) throw new Error('validate-merchant failed');
+    session.completeMerchantValidation(await response.json());
+  } catch (error) {
+    session.abort();
+  }
+};
 
-- O `.cer` do **Payment Processing Certificate** (gerado nesta etapa).
-- O `.pem` do **Merchant Identity Certificate** (gerado na Etapa 3).
-- A `.key` correspondente ao Merchant Identity Certificate.
-- O **Merchant Identifier** criado na Etapa 1.
-- O **Display Name** que aparecerá na folha de pagamento (até 64 caracteres UTF-8).
+session.onpaymentauthorized = async (event) => {
+  // Enviar event.payment.token ao seu backend, que cria a cobrança (Etapa 5)
+  const result = await createChargeOnYourBackend(event.payment.token);
+  session.completePayment(
+    result.status === 'paid'
+      ? ApplePaySession.STATUS_SUCCESS
+      : ApplePaySession.STATUS_FAILURE,
+  );
+};
 
-<Warning>Nunca exponha publicamente nem comite no Git as chaves privadas (`.key`). Compartilhe-as com a FastPay através de canais seguros indicados pela equipe de suporte.</Warning>
+// Chame begin() de forma síncrona dentro do handler de clique do botão.
+session.begin();
+```
 
-## Etapa 5 — Resumo dos Artefatos Entregues à FastPay
+<Note>Regras do Safari: avalie `ApplePaySession.canMakePayments()` depois do evento `load` do SDK, registre o clique diretamente no elemento `<apple-pay-button>` e chame `session.begin()` sem nenhum `await` antes.</Note>
 
-Para concluir o credenciamento, confirme com nossa equipe que você entregou:
+<Note>Modo de teste: uma chave `pk_test_` valida a sessão no provedor real (o botão precisa abrir no Safari), mas a cobrança correspondente cai no processador de teste e nenhum valor é movimentado. As tentativas de validação contam no limite de requisições da sua conta.</Note>
 
-| Item                                  | Origem                                                | Obrigatório |
-| ------------------------------------- | ----------------------------------------------------- | ----------- |
-| Merchant Identifier                   | Etapa 1                                               | Sim         |
-| Display Name                          | Definido pelo lojista                                 | Sim         |
-| Lista de domínios validados           | Etapa 2                                               | Sim         |
-| Merchant Identity Certificate (`.pem`)| Etapa 3                                               | Sim         |
-| Merchant Identity Key (`.key`)        | Etapa 3                                               | Sim         |
-| Payment Processing Certificate (`.cer`)| Etapa 4                                              | Sim         |
-| Ambiente (sandbox/produção)           | Definido pelo lojista                                 | Sim         |
+## Etapa 5 — Criar a cobrança
 
-Após validar e instalar os artefatos, a FastPay confirmará a ativação do Apple
-Pay para o seu merchant.
-
-## Integração com a API da FastPay
-
-Após concluir o credenciamento, o pagamento via Apple Pay é realizado através do
-endpoint padrão de cobranças [`POST /v1/charges`](/api-reference/charges/create-a-new-charge),
-utilizando o `paymentMethod` do tipo `credit_card` com o campo adicional
-`wallet`.
-
-### Como obter o token
-
-O token Apple Pay (`paymentData`) é gerado pelo dispositivo do cliente durante o
-fluxo do [Apple Pay JS API](https://developer.apple.com/documentation/apple_pay_on_the_web).
-Após o cliente autorizar o pagamento, sua aplicação recebe o evento
-`onpaymentauthorized` contendo o objeto `payment.token`, que deve ser enviado
-**na íntegra** para a FastPay no momento da criação da cobrança.
-
-### Estrutura do payload
-
-Quando o campo `wallet` é informado, os dados do cartão (`number`,
-`holderName`, `expirationMonth`, `expirationYear`, `cvv`) **não são
-necessários** — a FastPay descriptografa o token Apple Pay e extrai
-automaticamente as informações do cartão. Apenas `installments` continua
-obrigatório.
+Envie o objeto `payment.token` **na íntegra** em `paymentMethod.wallet`, pelo
+endpoint padrão [`POST /v1/charges`](/api-reference/charges/create-a-new-charge).
+A cobrança é criada pelo seu backend, com a chave secreta: a chave pública só
+valida a sessão, não cria cobranças. Com `wallet` presente, os campos do cartão
+(`number`, `holderName`, `expirationMonth`, `expirationYear`, `cvv`) não são
+necessários; `installments` continua obrigatório.
 
 ```json
 {
@@ -220,12 +221,12 @@ obrigatório.
       "token": {
         "paymentData": {
           "version": "EC_v1",
-          "data": "<base64-encoded encrypted payment data>",
-          "signature": "<base64-encoded detached PKCS#7 signature>",
+          "data": "<base64>",
+          "signature": "<base64>",
           "header": {
-            "ephemeralPublicKey": "<base64-encoded EC public key>",
-            "publicKeyHash": "<base64-encoded SHA-256 hash>",
-            "transactionId": "<hex-encoded transaction id>"
+            "ephemeralPublicKey": "<base64>",
+            "publicKeyHash": "<base64>",
+            "transactionId": "<hex>"
           }
         },
         "paymentMethod": {
@@ -233,7 +234,7 @@ obrigatório.
           "network": "Visa",
           "type": "credit"
         },
-        "transactionIdentifier": "<unique transaction identifier>"
+        "transactionIdentifier": "<id>"
       }
     }
   },
@@ -249,70 +250,115 @@ obrigatório.
 }
 ```
 
-### Campos do objeto `wallet`
+A FastPay não decifra o conteúdo de `paymentData`: ele é repassado ao
+processador exatamente como veio. Só a versão `EC_v1` do token é aceita, e o
+pass-through opera apenas em **BRL** — outra moeda é recusada com
+`APPLE_PAY_UVY_CURRENCY_NOT_SUPPORTED`. O 3D Secure não se aplica a Apple Pay (a
+autenticação já está embutida no token).
 
-| Campo                              | Tipo     | Descrição                                                                             |
-| ---------------------------------- | -------- | ------------------------------------------------------------------------------------- |
-| `type`                             | `string` | Fixo em `applepay`.                                                                   |
-| `token`                            | `object` | Objeto `payment.token` retornado pela Apple Pay JS API após a autorização do cliente. |
-| `token.paymentData`                | `object` | Dados criptografados do pagamento.                                                    |
-| `token.paymentData.version`        | `string` | Versão do formato do token. Fixo em `EC_v1`.                                          |
-| `token.paymentData.data`           | `string` | Dados do pagamento criptografados, codificados em Base64.                             |
-| `token.paymentData.signature`      | `string` | Assinatura PKCS #7 destacada, codificada em Base64.                                   |
-| `token.paymentData.header`         | `object` | Cabeçalho com as informações de troca de chaves.                                      |
-| `token.paymentMethod.displayName`  | `string` | Descrição localizada do cartão (ex.: `"Visa 1234"`).                                  |
-| `token.paymentMethod.network`      | `string` | Bandeira do cartão (ex.: `Visa`, `Mastercard`, `Amex`, `Discover`).                   |
-| `token.paymentMethod.type`         | `string` | Tipo do cartão. Um de: `debit`, `credit`, `prepaid`, `store`.                         |
-| `token.transactionIdentifier`      | `string` | Identificador único da transação Apple Pay.                                           |
+## Redes suportadas
 
-<Warning>Não tente decodificar, modificar ou armazenar o conteúdo do token — ele é criptografado com o **Payment Processing Certificate** enviado na Etapa 4 e só a FastPay possui a chave para descriptografá-lo.</Warning>
+| Rede | Situação |
+| --- | --- |
+| Visa | Suportada |
+| Mastercard | Suportada |
+| Elo | Em homologação pelo processador |
 
-Para detalhes do schema, consulte o [API Reference](/api-reference/charges/create-a-new-charge).
+Configure `supportedNetworks` no `ApplePaySession` apenas com as redes suportadas
+para o cliente não autorizar um pagamento que será recusado.
 
-## Renovação dos Certificados
+## Códigos de erro
 
-Os certificados Apple Pay possuem validade de **aproximadamente 25 meses**. Antes
-do vencimento:
-
-1. Repita as Etapas 3 e 4 para gerar novos `.pem`/`.cer`.
-2. Reenvie os arquivos à FastPay com pelo menos **30 dias de antecedência** para
-   garantir uma troca sem indisponibilidade.
+| Código | HTTP | Quando |
+| --- | --- | --- |
+| `APPLE_PAY_INVALID_DOMAIN` | 400 | `domain` não é um hostname puro (tem esquema, porta, caminho, é um IP ou é inválido). |
+| `APPLE_PAY_DOMAIN_ALREADY_REGISTERED` | 409 | O hostname já está registrado para outro dono na mesma conta de gateway. Repetir o registro do mesmo dono é idempotente e não gera conflito. |
+| `APPLE_PAY_DOMAIN_NOT_FOUND` | 404 | `id` inexistente, removido ou fora do seu escopo. |
+| `APPLE_PAY_DOMAIN_VERIFICATION_FAILED` | 422 | Arquivo de verificação ausente ou inacessível. |
+| `APPLE_PAY_DOMAIN_NOT_VERIFIED` | 400 | `validate-merchant` para domínio que não é seu, não registrado ou ainda não verificado. |
+| `APPLE_PAY_INVALID_VALIDATION_URL` | 400 | `validationUrl` não é uma URL HTTPS em um host `apple.com` (sem porta explícita e sem credenciais). |
+| `APPLE_PAY_PROVIDER_NOT_ENABLED` | 422 | A conta ainda não está no modelo pass-through: registre o domínio (Etapa 1) para habilitá-lo. |
+| `APPLE_PAY_RATE_LIMITED` | 429 | Muitas validações de sessão em pouco tempo (limite por IP e por conta). Aguarde alguns minutos. |
+| `APPLE_PAY_UVY_NOT_CONFIGURED` | 422 | O processador de Apple Pay não está configurado para a sua conta; fale com o suporte. |
+| `APPLE_PAY_TOKEN_INVALID` | 400 | O objeto enviado em `wallet.token` não está no formato do token da Apple; envie-o na íntegra, sem reescrever campos. |
+| `APPLE_PAY_CUSTOMER_DOCUMENT_REQUIRED` | 400 | `customer.document` ausente. O token da Apple não traz CPF/CNPJ e a Uvy exige o documento em toda cobrança: colete-o no seu checkout antes de abrir o sheet. |
+| `APPLE_PAY_UVY_CURRENCY_NOT_SUPPORTED` | 422 | Cobrança com Apple Pay pass-through em moeda diferente de `BRL`. |
+| `APPLE_PAY_PROVIDER_REJECTED` | 400 | O processador recusou a operação ou devolveu uma resposta fora do contrato. |
+| `APPLE_PAY_PROVIDER_UNAVAILABLE` | 503 | Processador indisponível ou limite de requisições atingido no processador; tente de novo. |
+| `APPLE_PAY_PROVIDER_AUTH_FAILED` | 500 | Falha de autenticação entre a FastPay e o processador; fale com o suporte. |
 
 ## Troubleshooting
 
-### Falha ao verificar o domínio
+**`validate-merchant` responde 400 `APPLE_PAY_DOMAIN_NOT_VERIFIED`.** O `domain`
+enviado precisa ser idêntico ao registrado, pertencer ao merchant da chave
+pública e estar com `status: verified`. Confira com `GET /v1/apple-pay/domains`
+e valide o domínio (Etapa 3).
 
-**Possíveis causas:**
+**`validate-merchant` responde 422 `APPLE_PAY_PROVIDER_NOT_ENABLED`.** A conta
+ainda não foi habilitada no modelo pass-through. Registre o primeiro domínio
+(Etapa 1): é o registro que habilita o fluxo deste guia.
 
-- O arquivo de validação não está acessível em `/.well-known/apple-developer-merchantid-domain-association.txt`.
-- O domínio não está servido sob HTTPS válido.
-- Redirecionamentos HTTP → HTTPS estão removendo o arquivo do path.
+**`validate-merchant` responde 429 `APPLE_PAY_RATE_LIMITED`.** Há um limite de
+validações por IP e por conta em uma janela de poucos minutos. Não repita a
+chamada em laço: valide a sessão uma vez por clique no botão.
 
-**Solução:** valide manualmente com:
+**A validação do domínio falha (422).** Teste o `curl -sI` da Etapa 2: o path é sem
+extensão, o content-type é `text/plain`, não há redirect e o conteúdo é o
+`verificationFile.content` sem alterações.
 
-```bash
-curl -I https://<seu-dominio>/.well-known/apple-developer-merchantid-domain-association.txt
-```
+**O botão não aparece.** O Apple Pay só está disponível no Safari (macOS/iOS) com
+ao menos um cartão na Wallet, e `canMakePayments()` precisa ser avaliado depois do
+`load` do SDK.
 
-A resposta deve ser `200 OK` e o `Content-Type` deve permitir leitura como texto.
+## Migração: quem já operava com certificado próprio
 
-### CSR rejeitado pela Apple
+Esta seção é para quem integrou pela versão anterior deste guia: conta no Apple
+Developer Program, Merchant ID próprio, domínio verificado no portal da Apple,
+Merchant Identity Certificate no seu backend e Payment Processing Certificate
+entregue à FastPay, que decifrava o token. Esse modelo continua disponível, mas
+novas integrações e contas migradas usam o fluxo pass-through deste guia.
 
-- Certifique-se de **não** ter informado uma Challenge password.
-- O CSR precisa ter sido gerado com chave **RSA de 2048 bits**.
-- Cada `Create Certificate` na Apple consome o CSR — gere um novo para cada
-  tentativa.
+### O que muda
 
-### Botão Apple Pay não aparece no checkout
+| | Certificado próprio (antes) | Pass-through (agora) |
+| --- | --- | --- |
+| Conta Apple Developer e Merchant ID | Obrigatórios, seus | Não são necessários: a relação com a Apple é do processador |
+| Verificação do domínio | No portal da Apple, com o arquivo `.txt` do seu Merchant ID em `/.well-known/` | Pela API da FastPay (Etapas 1 a 3), com o arquivo do processador no path **sem extensão**. O `.txt` antigo pode continuar no ar |
+| `onvalidatemerchant` | Resolvido no seu backend com o Merchant Identity Certificate | Chama `POST /v1/apple-pay/validate-merchant` com a chave `pk_` (Etapa 4) e devolve a sessão à Apple sem modificar |
+| Certificados | Payment Processing Certificate entregue à FastPay, renovação a cada 25 meses | Nenhum certificado, nada a renovar |
+| `supportedNetworks` | Visa, Mastercard, Amex, Discover | Apenas `visa` e `masterCard` (Elo em homologação) |
+| Moeda | Qualquer moeda da sua conta | Apenas `BRL` (`APPLE_PAY_UVY_CURRENCY_NOT_SUPPORTED`) |
+| `customer.document` na cobrança | Opcional | Obrigatório (`APPLE_PAY_CUSTOMER_DOCUMENT_REQUIRED`): o token da Apple não traz CPF/CNPJ, colete-o antes de abrir o sheet |
+| 3D Secure | Aplicado pela FastPay sobre o cartão decifrado | Não se aplica: `three_ds` vem nulo na resposta e nos webhooks |
+| `POST /v1/charges` | `paymentMethod.wallet` com o token na íntegra | Igual, sem mudança de formato |
 
-- O domínio acessado pelo cliente precisa estar na lista de **Merchant Domains**
-  verificados.
-- O navegador precisa ser **Safari** em macOS/iOS ou um navegador compatível com
-  o dispositivo Apple do cliente.
-- O cliente precisa ter **pelo menos um cartão** cadastrado na Wallet.
+Continuam iguais: as chaves `sk_` e `pk_`, o parcelamento, os webhooks de cobrança
+(com `three_ds` nulo e a possibilidade do status `in_analysis`), e o rótulo do
+sheet, que vem do `total.label` do seu `ApplePaySession`.
 
-## Documentação de Referência
+### Ordem da virada
 
-- [Apple Developer — Configuring your environment](https://developer.apple.com/documentation/apple_pay_on_the_web/configuring_your_environment)
-- [Apple Pay on the Web — Human Interface Guidelines](https://developer.apple.com/design/human-interface-guidelines/apple-pay)
-- [API Reference da FastPay](/api-reference/charges/create-a-new-charge)
+O registro do primeiro domínio coloca a conta no modelo pass-through **no mesmo
+instante**: a partir dele, um token gerado pelo seu Merchant ID antigo é recusado
+pelo processador. Por isso, prepare tudo antes e faça os passos 3 a 5 na mesma
+janela.
+
+1. Prepare, sem publicar, o novo frontend: `onvalidatemerchant` da Etapa 4,
+   `supportedNetworks: ['visa', 'masterCard']`, `currencyCode: 'BRL'`, coleta de
+   CPF/CNPJ antes do sheet e `customer.document` na cobrança.
+2. Deixe pronta a rota que vai servir
+   `/.well-known/apple-developer-merchantid-domain-association` em `text/plain`,
+   sem redirect. O conteúdo vem no passo 3.
+3. Registre cada hostname onde o botão aparece (Etapa 1). Guarde `id` e
+   `verificationFile.content`.
+4. Hospede o arquivo (Etapa 2) e valide cada domínio até `verified` (Etapa 3).
+5. Publique o novo frontend e faça uma compra real de valor baixo.
+
+Para voltar ao modelo anterior depois da virada, fale com o suporte. Se você
+também vende pelo link de pagamento da FastPay, não há nada a fazer nele.
+
+## Documentação de referência
+
+- [API Reference — criar cobrança](/api-reference/charges/create-a-new-charge)
+- [Apple Pay on the Web — Apple Developer](https://developer.apple.com/documentation/apple_pay_on_the_web)
+- [Apple Pay — Human Interface Guidelines](https://developer.apple.com/design/human-interface-guidelines/apple-pay)
