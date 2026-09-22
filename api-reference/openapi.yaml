@@ -3288,7 +3288,7 @@ components:
 
                 A integração é **pass-through**: a FastPay não decifra o token — ele é
                 repassado na íntegra ao processador. Só a versão `EC_v1` é aceita, a
-                moeda deve ser `BRL` (`APPLE_PAY_UVY_CURRENCY_NOT_SUPPORTED`) e
+                moeda deve ser `BRL` (`APPLE_PAY_CURRENCY_NOT_SUPPORTED`) e
                 `customer.document` é obrigatório (`APPLE_PAY_CUSTOMER_DOCUMENT_REQUIRED`).
                 O 3D Secure não se aplica (a autenticação já está embutida no token).
                 Antes de cobrar, registre e verifique o domínio e valide a sessão —

@@ -72,7 +72,6 @@ Resposta (`201 Created`):
   "id": "2xY9...KSUID",
   "merchantId": "2v2T...KSUID",
   "domain": "checkout.minhaloja.com.br",
-  "provider": "uvy",
   "status": "pending",
   "verifiedAt": null,
   "lastVerificationError": null,
@@ -253,7 +252,7 @@ necessários; `installments` continua obrigatório.
 A FastPay não decifra o conteúdo de `paymentData`: ele é repassado ao
 processador exatamente como veio. Só a versão `EC_v1` do token é aceita, e o
 pass-through opera apenas em **BRL** — outra moeda é recusada com
-`APPLE_PAY_UVY_CURRENCY_NOT_SUPPORTED`. O 3D Secure não se aplica a Apple Pay (a
+`APPLE_PAY_CURRENCY_NOT_SUPPORTED`. O 3D Secure não se aplica a Apple Pay (a
 autenticação já está embutida no token).
 
 ## Redes suportadas
@@ -279,10 +278,10 @@ para o cliente não autorizar um pagamento que será recusado.
 | `APPLE_PAY_INVALID_VALIDATION_URL` | 400 | `validationUrl` não é uma URL HTTPS em um host `apple.com` (sem porta explícita e sem credenciais). |
 | `APPLE_PAY_PROVIDER_NOT_ENABLED` | 422 | A conta ainda não está no modelo pass-through: registre o domínio (Etapa 1) para habilitá-lo. |
 | `APPLE_PAY_RATE_LIMITED` | 429 | Muitas validações de sessão em pouco tempo (limite por IP e por conta). Aguarde alguns minutos. |
-| `APPLE_PAY_UVY_NOT_CONFIGURED` | 422 | O processador de Apple Pay não está configurado para a sua conta; fale com o suporte. |
+| `APPLE_PAY_PROVIDER_NOT_CONFIGURED` | 422 | O processador de Apple Pay não está configurado para a sua conta; fale com o suporte. |
 | `APPLE_PAY_TOKEN_INVALID` | 400 | O objeto enviado em `wallet.token` não está no formato do token da Apple; envie-o na íntegra, sem reescrever campos. |
-| `APPLE_PAY_CUSTOMER_DOCUMENT_REQUIRED` | 400 | `customer.document` ausente. O token da Apple não traz CPF/CNPJ e a Uvy exige o documento em toda cobrança: colete-o no seu checkout antes de abrir o sheet. |
-| `APPLE_PAY_UVY_CURRENCY_NOT_SUPPORTED` | 422 | Cobrança com Apple Pay pass-through em moeda diferente de `BRL`. |
+| `APPLE_PAY_CUSTOMER_DOCUMENT_REQUIRED` | 400 | `customer.document` ausente. O token da Apple não traz CPF/CNPJ e o processador exige o documento em toda cobrança: colete-o no seu checkout antes de abrir o sheet. |
+| `APPLE_PAY_CURRENCY_NOT_SUPPORTED` | 422 | Cobrança com Apple Pay pass-through em moeda diferente de `BRL`. |
 | `APPLE_PAY_PROVIDER_REJECTED` | 400 | O processador recusou a operação ou devolveu uma resposta fora do contrato. |
 | `APPLE_PAY_PROVIDER_UNAVAILABLE` | 503 | Processador indisponível ou limite de requisições atingido no processador; tente de novo. |
 | `APPLE_PAY_PROVIDER_AUTH_FAILED` | 500 | Falha de autenticação entre a FastPay e o processador; fale com o suporte. |
@@ -327,7 +326,7 @@ novas integrações e contas migradas usam o fluxo pass-through deste guia.
 | `onvalidatemerchant` | Resolvido no seu backend com o Merchant Identity Certificate | Chama `POST /v1/apple-pay/validate-merchant` com a chave `pk_` (Etapa 4) e devolve a sessão à Apple sem modificar |
 | Certificados | Payment Processing Certificate entregue à FastPay, renovação a cada 25 meses | Nenhum certificado, nada a renovar |
 | `supportedNetworks` | Visa, Mastercard, Amex, Discover | Apenas `visa` e `masterCard` (Elo em homologação) |
-| Moeda | Qualquer moeda da sua conta | Apenas `BRL` (`APPLE_PAY_UVY_CURRENCY_NOT_SUPPORTED`) |
+| Moeda | Qualquer moeda da sua conta | Apenas `BRL` (`APPLE_PAY_CURRENCY_NOT_SUPPORTED`) |
 | `customer.document` na cobrança | Opcional | Obrigatório (`APPLE_PAY_CUSTOMER_DOCUMENT_REQUIRED`): o token da Apple não traz CPF/CNPJ, colete-o antes de abrir o sheet |
 | 3D Secure | Aplicado pela FastPay sobre o cartão decifrado | Não se aplica: `three_ds` vem nulo na resposta e nos webhooks |
 | `POST /v1/charges` | `paymentMethod.wallet` com o token na íntegra | Igual, sem mudança de formato |
