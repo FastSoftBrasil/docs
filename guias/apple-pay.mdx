@@ -23,7 +23,18 @@ O fluxo tem três partes:
 - Chave pública (`pk_`) para validar a sessão a partir do navegador, vinculada a **um único
   merchant** (uma chave compartilhada por vários merchants torna a checagem do domínio ambígua).
 - Domínio próprio servido em **HTTPS** com certificado válido, sem redirecionamento no path `/.well-known/`.
-- Botão Apple Pay pelo [Apple Pay JS SDK](https://developer.apple.com/documentation/apple_pay_on_the_web).
+- Botão Apple Pay pelo [Apple Pay JS SDK](https://developer.apple.com/documentation/apple_pay_on_the_web), versão 1.2.0 ou superior, com o elemento `<apple-pay-button>` registrado pelo SDK. É o SDK que estende o Apple Pay para fora do Safari (tabela abaixo); o botão feito só com CSS funciona apenas no WebKit.
+
+### Onde o botão aparece
+
+| Dispositivo do cliente | Navegador | Experiência |
+| --- | --- | --- |
+| iPhone ou iPad | Safari, Chrome, Edge, Firefox e outros | Folha nativa do Apple Pay no próprio dispositivo (no iOS todos os navegadores usam o WebKit). |
+| Mac | Safari | Folha nativa do Apple Pay, com Touch ID ou confirmação no iPhone/Apple Watch. |
+| Mac ou PC com Windows | Chrome, Edge, Firefox e outros | O SDK abre um modal com um código; o cliente escaneia com a câmera do iPhone (iOS 18 ou superior) e autoriza no iPhone. |
+| Android | Qualquer | Sem Apple Pay: `canMakePayments()` retorna `false` e o botão não aparece. |
+
+Nada muda na integração entre esses casos: o `onvalidatemerchant` chama o mesmo endpoint da FastPay e o token autorizado chega no mesmo formato. A única exigência é avaliar `canMakePayments()` **depois** do evento `load` do SDK, porque fora do Safari é o SDK que define `ApplePaySession`.
 
 <Note>Cada hostname é um registro próprio: `www.loja.com` e `loja.com` são domínios diferentes. Registre exatamente o hostname que o navegador mostra em `window.location.hostname`.</Note>
 
@@ -96,6 +107,16 @@ quando a tentativa anterior falhou, caso em que o registro preservado no
 processador é reaproveitado. Se `verificationFile.content` vier `null`, o
 registro fica de pé mas não há arquivo para hospedar: fale com o suporte, em vez
 de repetir a chamada.
+
+**Domínio compartilhado por vários merchants.** Plataformas de checkout que
+servem várias lojas em um mesmo hostname (por exemplo, `checkout.plataforma.com`)
+registram esse hostname uma vez **para cada merchant**, com a `sk_` de cada um.
+Cada registro é independente: tem o próprio `id`, o próprio `status` e habilita o
+pass-through daquele merchant. O arquivo de verificação é o mesmo para todos os
+registros da conta, então basta hospedá-lo uma vez por hostname; os registros
+seguintes já nascem com o `status` que o hostname tem. Lojas com domínio próprio
+registram também o domínio próprio, e o navegador sempre envia o hostname real da
+página no validate-merchant.
 
 <Warning>O registro do primeiro domínio muda o modelo de Apple Pay da sua conta para pass-through no mesmo instante. Se você já operava com certificado próprio, siga a ordem da seção "Migração: quem já operava com certificado próprio", no fim deste guia, antes de registrar.</Warning>
 
@@ -271,14 +292,14 @@ para o cliente não autorizar um pagamento que será recusado.
 | Código | HTTP | Quando |
 | --- | --- | --- |
 | `APPLE_PAY_INVALID_DOMAIN` | 400 | `domain` não é um hostname puro (tem esquema, porta, caminho, é um IP ou é inválido). |
-| `APPLE_PAY_DOMAIN_ALREADY_REGISTERED` | 409 | O hostname já está registrado para outro dono na mesma conta de gateway. Repetir o registro do mesmo dono é idempotente e não gera conflito. |
+| `APPLE_PAY_DOMAIN_ALREADY_REGISTERED` | 409 | Duas chamadas simultâneas registrando o mesmo hostname para o mesmo dono. Repita a chamada: o registro que venceu a corrida é devolvido. |
 | `APPLE_PAY_DOMAIN_NOT_FOUND` | 404 | `id` inexistente, removido ou fora do seu escopo. |
 | `APPLE_PAY_DOMAIN_VERIFICATION_FAILED` | 422 | Arquivo de verificação ausente ou inacessível. |
 | `APPLE_PAY_DOMAIN_NOT_VERIFIED` | 400 | `validate-merchant` para domínio que não é seu, não registrado ou ainda não verificado. |
 | `APPLE_PAY_INVALID_VALIDATION_URL` | 400 | `validationUrl` não é uma URL HTTPS em um host `apple.com` (sem porta explícita e sem credenciais). |
 | `APPLE_PAY_PROVIDER_NOT_ENABLED` | 422 | A conta ainda não está no modelo pass-through: registre o domínio (Etapa 1) para habilitá-lo. |
 | `APPLE_PAY_RATE_LIMITED` | 429 | Muitas validações de sessão em pouco tempo (limite por IP e por conta). Aguarde alguns minutos. |
-| `APPLE_PAY_PROVIDER_NOT_CONFIGURED` | 422 | O processador de Apple Pay não está configurado para a sua conta; fale com o suporte. |
+| `APPLE_PAY_PROCESSOR_NOT_CONFIGURED` | 422 | O processador de Apple Pay não está configurado para a sua conta; fale com o suporte. |
 | `APPLE_PAY_TOKEN_INVALID` | 400 | O objeto enviado em `wallet.token` não está no formato do token da Apple; envie-o na íntegra, sem reescrever campos. |
 | `APPLE_PAY_CUSTOMER_DOCUMENT_REQUIRED` | 400 | `customer.document` ausente. O token da Apple não traz CPF/CNPJ e o processador exige o documento em toda cobrança: colete-o no seu checkout antes de abrir o sheet. |
 | `APPLE_PAY_CURRENCY_NOT_SUPPORTED` | 422 | Cobrança com Apple Pay pass-through em moeda diferente de `BRL`. |
@@ -305,9 +326,11 @@ chamada em laço: valide a sessão uma vez por clique no botão.
 extensão, o content-type é `text/plain`, não há redirect e o conteúdo é o
 `verificationFile.content` sem alterações.
 
-**O botão não aparece.** O Apple Pay só está disponível no Safari (macOS/iOS) com
-ao menos um cartão na Wallet, e `canMakePayments()` precisa ser avaliado depois do
-`load` do SDK.
+**O botão não aparece.** Confira a tabela "Onde o botão aparece": Android não tem
+Apple Pay, e em Chrome, Edge ou Firefox no Mac e no Windows o botão só existe com o
+SDK carregado e o elemento `<apple-pay-button>`. Em qualquer caso, `canMakePayments()`
+precisa ser avaliado depois do `load` do SDK, e o cliente precisa de ao menos um
+cartão na Wallet do iPhone para concluir o pagamento.
 
 ## Migração: quem já operava com certificado próprio
 
